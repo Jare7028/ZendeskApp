@@ -1,0 +1,60 @@
+"use server";
+
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
+
+import { getCurrentUserContext } from "@/lib/auth/session";
+import { saveAgentMappingOverride } from "@/lib/connecteam/sync";
+
+function buildAdminRedirect(status: string, detail?: string) {
+  const search = new URLSearchParams({ sync: status });
+
+  if (detail) {
+    search.set("detail", detail);
+  }
+
+  return `/admin?${search.toString()}`;
+}
+
+async function requireAdmin() {
+  const context = await getCurrentUserContext();
+
+  if (!context) {
+    redirect("/login");
+  }
+
+  if (context.role !== "admin") {
+    redirect("/dashboard");
+  }
+
+  return context;
+}
+
+export async function saveAgentMappingOverrideAction(formData: FormData) {
+  await requireAdmin();
+
+  const clientId = String(formData.get("clientId") ?? "").trim();
+  const zendeskConnectionId = String(formData.get("zendeskConnectionId") ?? "").trim();
+  const connecteamConnectionId = String(formData.get("connecteamConnectionId") ?? "").trim();
+  const zendeskAgentId = String(formData.get("zendeskAgentId") ?? "").trim();
+  const connecteamUserIdRaw = String(formData.get("connecteamUserId") ?? "").trim();
+
+  if (!clientId || !zendeskConnectionId || !connecteamConnectionId || !zendeskAgentId) {
+    redirect(buildAdminRedirect("mapping-missing-fields"));
+  }
+
+  try {
+    await saveAgentMappingOverride({
+      clientId,
+      zendeskConnectionId,
+      connecteamConnectionId,
+      zendeskAgentId,
+      connecteamUserId: connecteamUserIdRaw || null
+    });
+    revalidatePath("/admin");
+    redirect(buildAdminRedirect("mapping-saved"));
+  } catch (error) {
+    revalidatePath("/admin");
+    redirect(buildAdminRedirect("mapping-save-failed", error instanceof Error ? error.message : undefined));
+  }
+}
