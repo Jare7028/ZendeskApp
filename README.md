@@ -47,6 +47,10 @@ Run the app locally with `npm run dev`.
 - Durable sync state is stored in `app.zendesk_sync_runs`, `app.zendesk_backfills`, and the watermark/status columns on `app.zendesk_connections`.
 - Ticket payloads are stored in `app.tickets.raw_payload`, channel type is stored in `app.tickets.channel`, and agent records land in `app.zendesk_agents`.
 - Cron runs process up to three active connections per invocation and backfills advance in small cursor chunks so long histories can resume safely.
+- The `/dashboard` page now recomputes the selected date window server-side into `app.computed_metrics`, then reads daily rollups for cards and charts instead of recomputing analytics inside React components.
+- Daily computed metric rows use JSON dimensions for `client`, `agent`, `channel`, and `agent_channel` scopes so the dashboard can filter against persisted rollups.
+- `requester_wait_time_minutes` is sourced from Zendesk ticket metric payload field `requester_wait_time_in_minutes.calendar` when that durable value is present.
+- Agent utilisation is currently defined as scheduled hours on days with ticket activity divided by total scheduled hours, because the synced model does not yet persist a durable handle-time field suitable for active-work utilisation.
 - OAuth connection management lives on `/connections` for admins:
   - choose the app client, optional connection label, and Zendesk subdomain
   - start the Zendesk OAuth flow against `https://{subdomain}.zendesk.com`

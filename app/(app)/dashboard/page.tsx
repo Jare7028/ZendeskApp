@@ -1,45 +1,166 @@
-import { StatusCard } from "@/components/dashboard/status-card";
-import { Badge } from "@/components/ui/badge";
-import { getCurrentUserContext } from "@/lib/auth/session";
+import { redirect } from "next/navigation";
 
-export default async function DashboardPage() {
+import { ChannelStackedCard } from "@/components/dashboard/channel-stacked-card";
+import { DashboardFilters } from "@/components/dashboard/dashboard-filters";
+import { LineChartCard } from "@/components/dashboard/line-chart-card";
+import { MetricCard } from "@/components/dashboard/metric-card";
+import { ServiceLevelCard } from "@/components/dashboard/service-level-card";
+import { getCurrentUserContext } from "@/lib/auth/session";
+import { getDashboardData } from "@/lib/metrics/dashboard";
+
+function formatNumber(value: number | null, maximumFractionDigits = 1) {
+  if (value === null || !Number.isFinite(value)) {
+    return "No data";
+  }
+
+  return new Intl.NumberFormat("en-GB", {
+    maximumFractionDigits
+  }).format(value);
+}
+
+function formatPercent(value: number | null) {
+  if (value === null || !Number.isFinite(value)) {
+    return "No data";
+  }
+
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatMinutes(value: number | null) {
+  if (value === null || !Number.isFinite(value)) {
+    return "No data";
+  }
+
+  if (value >= 60) {
+    return `${(value / 60).toFixed(1)}h`;
+  }
+
+  return `${value.toFixed(1)}m`;
+}
+
+export default async function DashboardPage({
+  searchParams
+}: {
+  searchParams?: {
+    client?: string;
+    agent?: string;
+    start?: string;
+    end?: string;
+  };
+}) {
   const context = await getCurrentUserContext();
 
   if (!context) {
-    return null;
+    redirect("/login");
   }
+
+  const dashboard = await getDashboardData(searchParams);
 
   return (
     <div className="space-y-8">
-      <section className="flex flex-col gap-3 rounded-[28px] border bg-card/90 p-6 shadow-panel sm:p-8">
-        <Badge>{context.role}</Badge>
-        <div className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight">Protected dashboard shell</h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            This milestone establishes the authenticated shell, role-aware navigation, and Supabase-backed
-            RBAC foundation for later analytics work.
-          </p>
-        </div>
-      </section>
+      <DashboardFilters
+        agents={dashboard.agentOptions}
+        clients={dashboard.visibleClients}
+        filters={dashboard.filters}
+        role={context.role}
+      />
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <StatusCard
-          title="Authentication"
-          value="Ready"
-          description="Email/password login, signup, password reset, and callback exchange are wired."
-        />
-        <StatusCard
-          title="Role model"
-          value={context.role}
-          description="Primary role is resolved from Supabase and used to shape navigation and guards."
-        />
-        <StatusCard
-          title="Next milestone"
-          value="Data sync"
-          description="Connection tables and protected views are in place for Zendesk and Connecteam ingestion."
-        />
-      </section>
+      {!dashboard.hasVisibleClients ? (
+        <section className="rounded-[28px] border bg-card/90 p-8 shadow-panel">
+          <h2 className="text-2xl font-semibold tracking-tight">No client access configured</h2>
+          <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
+            This account does not currently have any visible clients, so there is no dashboard data to query. Admins
+            can add client records and viewer assignments from Supabase before returning here.
+          </p>
+        </section>
+      ) : (
+        <>
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard
+              title="Interactions per hour worked"
+              value={formatNumber(dashboard.overview.interactionsPerHourWorked, 2)}
+              description="Headline throughput built from total ticket interactions divided by scheduled Connecteam hours."
+            />
+            <MetricCard
+              title="Total interactions"
+              value={formatNumber(dashboard.overview.totalInteractions, 0)}
+              description="Tickets handled inside the selected date window after client and agent filters are applied."
+            />
+            <MetricCard
+              title="Agent utilisation"
+              value={formatPercent(dashboard.overview.agentUtilisationRatio)}
+              description="Scheduled hours on days with ticket activity divided by total scheduled hours."
+            />
+            <MetricCard
+              title="Replies per ticket"
+              value={formatNumber(dashboard.overview.repliesPerTicket, 2)}
+              description="Average Zendesk replies captured in the synced ticket metric payload."
+            />
+            <MetricCard
+              title="Requester wait time"
+              value={formatMinutes(dashboard.overview.requesterWaitTimeMinutes)}
+              description="Average requester wait minutes, using Zendesk ticket metric payload requester wait data."
+            />
+            <MetricCard
+              title="Reopens per agent"
+              value={formatNumber(dashboard.overview.reopensPerAgent, 2)}
+              description="Average reopen count across agents with activity in the selected window."
+            />
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-2">
+            <ServiceLevelCard
+              average={dashboard.overview.avgFirstReplyMinutes}
+              description="Selected-range distribution"
+              median={dashboard.overview.medianFirstReplyMinutes}
+              p90={dashboard.overview.p90FirstReplyMinutes}
+              title="First reply time"
+            />
+            <ServiceLevelCard
+              average={dashboard.overview.avgFullResolutionMinutes}
+              description="Selected-range distribution"
+              median={dashboard.overview.medianFullResolutionMinutes}
+              p90={dashboard.overview.p90FullResolutionMinutes}
+              title="Full resolution time"
+            />
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-2">
+            <LineChartCard
+              data={dashboard.trends.volume.map((point) => ({
+                date: point.date,
+                primary: point.interactions,
+                secondary: point.hoursWorked
+              }))}
+              description="Daily throughput against scheduled hours worked for the current filter set."
+              primaryColor="#0f766e"
+              primaryLabel="Interactions"
+              secondaryColor="#d97706"
+              secondaryLabel="Hours worked"
+              title="Volume vs hours"
+            />
+            <LineChartCard
+              data={dashboard.trends.response.map((point) => ({
+                date: point.date,
+                primary: point.avgFirstReplyMinutes,
+                secondary: point.avgFullResolutionMinutes
+              }))}
+              description="Daily response and resolution averages, read back from precomputed daily rollups."
+              primaryColor="#0f4c81"
+              primaryLabel="Avg first reply"
+              secondaryColor="#7c6f64"
+              secondaryLabel="Avg full resolution"
+              title="Service trend"
+            />
+          </section>
+
+          <ChannelStackedCard
+            data={dashboard.trends.channel}
+            description="Daily interaction mix by channel. Email, chat, phone, and all remaining sources are broken out."
+            title="Channel mix over time"
+          />
+        </>
+      )}
     </div>
   );
 }
-
