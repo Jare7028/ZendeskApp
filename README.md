@@ -7,6 +7,7 @@ M1 sets up the production foundation for a Next.js dashboard backed by Supabase 
 - Email/password login, signup, forgot-password, reset-password, and auth callback handling
 - RBAC utilities and route guards for `admin`, `manager`, and `viewer`
 - A baseline Supabase migration covering users, role assignments, client scoping, connections, and operational data tables
+- Zendesk sync orchestration with durable run history, resumable backfill state, and admin-visible status
 
 ## Environment
 
@@ -15,6 +16,8 @@ Create `.env.local` with the existing external keys:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+CRON_SECRET=...
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
 
@@ -29,6 +32,17 @@ npm run build
 ```
 
 Run the app locally with `npm run dev`.
+
+## Zendesk sync
+
+- The sync engine reads existing `app.zendesk_connections` rows and expects server-usable credentials:
+  - `credential_type = 'api_token'` with `api_user_email` and `access_token_encrypted` populated
+  - or `credential_type = 'oauth_token'` with `access_token_encrypted` populated
+- Cron ingestion lives at `/api/cron/zendesk-sync` and requires `Authorization: Bearer $CRON_SECRET` or `?secret=$CRON_SECRET`.
+- Manual admin-triggered runs post to `/api/admin/zendesk-sync`.
+- Durable sync state is stored in `app.zendesk_sync_runs`, `app.zendesk_backfills`, and the watermark/status columns on `app.zendesk_connections`.
+- Ticket payloads are stored in `app.tickets.raw_payload`, channel type is stored in `app.tickets.channel`, and agent records land in `app.zendesk_agents`.
+- Cron runs process up to three active connections per invocation and backfills advance in small cursor chunks so long histories can resume safely.
 
 ## Auth flow
 
