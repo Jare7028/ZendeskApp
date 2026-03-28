@@ -16,6 +16,10 @@ export function getSupabaseAnonKey() {
   return required("NEXT_PUBLIC_SUPABASE_ANON_KEY");
 }
 
+export function getSupabaseServiceRoleKey() {
+  return required("SUPABASE_SERVICE_ROLE_KEY");
+}
+
 export function getBaseUrl() {
   return (
     process.env.NEXT_PUBLIC_SITE_URL ??
@@ -23,3 +27,6 @@ export function getBaseUrl() {
   );
 }
 
+export function getCronSecret() {
+  return required("CRON_SECRET");
+}
