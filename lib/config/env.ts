@@ -30,3 +30,15 @@ export function getBaseUrl() {
 export function getCronSecret() {
   return required("CRON_SECRET");
 }
+
+export function getZendeskOauthClientId() {
+  return required("ZENDESK_OAUTH_CLIENT_ID");
+}
+
+export function getZendeskOauthClientSecret() {
+  return required("ZENDESK_OAUTH_CLIENT_SECRET");
+}
+
+export function getZendeskOauthScopes() {
+  return process.env.ZENDESK_OAUTH_SCOPES?.trim() || "read write";
+}
