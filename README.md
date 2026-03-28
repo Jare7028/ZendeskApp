@@ -54,6 +54,21 @@ Run the app locally with `npm run dev`.
   - admins can test, re-authorize, and disconnect existing connections
 - OAuth refresh is handled server-side before sync and test requests. If Zendesk omits `expires_in`, the app refreshes when using a stored refresh token so later sync jobs still receive a current bearer token.
 
+## Connecteam connections
+
+- Admin connection management also lives on `/connections` for Connecteam:
+  - choose the app client, optional connection label, and paste a Connecteam API key
+  - the API key is stored server-side in `app.connecteam_connections.access_token_encrypted`, matching the existing explicit secret-storage pattern already used for connection credentials in this app
+  - save/test calls Connecteam `GET /me`, persists durable validation status fields on `app.connecteam_connections`, and stores basic account metadata in `metadata`
+  - admins can re-test and disconnect existing Connecteam connections without exposing the API key to the browser
+- Server-only Connecteam helpers live in `lib/connecteam/*` and provide:
+  - `GET /me`
+  - `GET /users/v1/users`
+  - `GET /scheduler/v1/schedulers`
+  - `GET /scheduler/v1/schedulers/{id}/shifts`
+- The Connecteam client uses `X-API-KEY` authentication, supports offset/limit pagination where available, and backs off on `429` or transient `5xx` responses via `Retry-After` when present.
+- Later sync milestones must source hours from Scheduler shifts, not Time Clock clock-in data. This milestone does not persist shift sync data yet.
+
 ## Auth flow
 
 - Unauthenticated users are redirected from `/dashboard`, `/connections`, and `/admin` to `/login`.
