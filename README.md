@@ -67,7 +67,26 @@ Run the app locally with `npm run dev`.
   - `GET /scheduler/v1/schedulers`
   - `GET /scheduler/v1/schedulers/{id}/shifts`
 - The Connecteam client uses `X-API-KEY` authentication, supports offset/limit pagination where available, and backs off on `429` or transient `5xx` responses via `Retry-After` when present.
-- Later sync milestones must source hours from Scheduler shifts, not Time Clock clock-in data. This milestone does not persist shift sync data yet.
+- Connecteam workforce sync uses Scheduler shifts, not Time Clock clock-in data.
+
+## Connecteam scheduled-shift sync
+
+- Admin-triggered Connecteam sync lives on `/admin` and a cron endpoint now exists at `/api/cron/connecteam-sync`.
+- The sync engine:
+  - loads all Connecteam users for the connection
+  - loads all schedulers, then fetches scheduler shifts
+  - persists raw user rows in `app.connecteam_users`
+  - persists per-user shift assignments in `app.connecteam_shifts`
+  - derives per-user scheduled minutes per local work day in `app.connecteam_daily_schedules`
+  - mirrors the daily scheduled result into `app.timesheet_data` with `payload.source = 'scheduled_shift'` so later metrics can query scheduled hours without calling Connecteam again
+- Incremental sync is driven by durable connection state on `app.connecteam_connections`, including sync status, run timestamps, `users_synced_at`, and `shifts_synced_through`.
+- Durable run history is stored in `app.connecteam_sync_runs`.
+- Agent identity matching also lives on `/admin`:
+  - Zendesk agents are matched to Connecteam users by normalized email within the same client and Connecteam connection
+  - auto-matches are stored in `app.agent_mappings`
+  - manual overrides are stored in the same table with `match_source = 'manual'` and `manual_override = true`
+  - later auto-syncs do not overwrite manual overrides
+- Scheduled hours are derived strictly from Scheduler shift `startDate`/`endDate`. Time Clock or punch data is not used anywhere in this milestone.
 
 ## Auth flow
 
@@ -93,6 +112,10 @@ Core tables:
 - `app.zendesk_connections`
 - `app.connecteam_connections`
 - `app.agent_mappings`
+- `app.connecteam_users`
+- `app.connecteam_sync_runs`
+- `app.connecteam_shifts`
+- `app.connecteam_daily_schedules`
 - `app.tickets`
 - `app.ticket_metrics`
 - `app.timesheet_data`
