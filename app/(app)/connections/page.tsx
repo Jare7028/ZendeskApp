@@ -6,11 +6,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getCurrentUserContext } from "@/lib/auth/session";
+import { getConnecteamConnectionStatus } from "@/lib/connecteam/status";
 import { getVisibleClients, getZendeskConnectionStatus } from "@/lib/zendesk/status";
 import {
+  createConnecteamConnectionAction,
   createZendeskConnectionAction,
+  disconnectConnecteamConnectionAction,
   disconnectZendeskConnectionAction,
   reauthZendeskConnectionAction,
+  testConnecteamConnectionAction,
   testZendeskConnectionAction
 } from "./actions";
 
@@ -57,6 +61,18 @@ function formatConnectionMessage(status: string | undefined, detail: string | un
       return { tone: "success", message: `Zendesk connection test passed${suffix}.` } satisfies FlashMessage;
     case "disconnected":
       return { tone: "neutral", message: `Zendesk connection disconnected${suffix}.` } satisfies FlashMessage;
+    case "connecteam-connected":
+      return { tone: "success", message: `Connecteam API key validated successfully${suffix}.` } satisfies FlashMessage;
+    case "connecteam-tested":
+      return { tone: "success", message: `Connecteam connection test passed${suffix}.` } satisfies FlashMessage;
+    case "connecteam-disconnected":
+      return { tone: "neutral", message: `Connecteam connection disconnected${suffix}.` } satisfies FlashMessage;
+    case "connecteam-missing-api-key":
+      return { tone: "error", message: "Connecteam API key is required." } satisfies FlashMessage;
+    case "connecteam-save-failed":
+      return { tone: "error", message: `Connecteam connection could not be saved${suffix}.` } satisfies FlashMessage;
+    case "connecteam-test-failed":
+      return { tone: "error", message: `Connecteam validation failed${suffix}.` } satisfies FlashMessage;
     case "oauth-denied":
       return { tone: "error", message: `Zendesk authorization was denied${suffix}.` } satisfies FlashMessage;
     case "oauth-failed":
@@ -98,7 +114,11 @@ export default async function ConnectionsPage({
     redirect("/dashboard");
   }
 
-  const [connections, clients] = await Promise.all([getZendeskConnectionStatus(), getVisibleClients()]);
+  const [zendeskConnections, connecteamConnections, clients] = await Promise.all([
+    getZendeskConnectionStatus(),
+    getConnecteamConnectionStatus(),
+    getVisibleClients()
+  ]);
   const flash = formatConnectionMessage(searchParams?.connection, searchParams?.detail);
 
   return (
@@ -106,7 +126,7 @@ export default async function ConnectionsPage({
       <div className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Connections</h1>
         <p className="text-sm text-muted-foreground">
-          Create, validate, re-authorize, and disconnect Zendesk OAuth connections for each client tenant.
+          Create, validate, re-authorize, and disconnect Zendesk and Connecteam connections for each client tenant.
         </p>
       </div>
 
@@ -115,6 +135,56 @@ export default async function ConnectionsPage({
           <CardContent className="pt-5 text-sm">{flash.message}</CardContent>
         </Card>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Add Connecteam connection</CardTitle>
+          <CardDescription>
+            Choose the client row, name the connection, and store a server-only Connecteam API key. Validation calls
+            Connecteam&apos;s <code>/me</code> endpoint.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {clients.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No app clients exist yet. Create a client record before adding a Connecteam connection.
+            </p>
+          ) : (
+            <form action={createConnecteamConnectionAction} className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="connecteamClientId">Client</Label>
+                <select
+                  className="flex h-11 w-full rounded-2xl border border-input bg-background px-4 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                  defaultValue=""
+                  id="connecteamClientId"
+                  name="clientId"
+                  required
+                >
+                  <option disabled value="">
+                    Select a client
+                  </option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="connecteamName">Connection label</Label>
+                <Input id="connecteamName" name="name" placeholder="Acme Workforce" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="apiKey">API key</Label>
+                <Input id="apiKey" name="apiKey" placeholder="Paste Connecteam API key" required type="password" />
+              </div>
+              <div className="md:col-span-3">
+                <Button type="submit">Save and validate Connecteam</Button>
+              </div>
+            </form>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -167,7 +237,98 @@ export default async function ConnectionsPage({
       </Card>
 
       <section className="grid gap-4">
-        {connections.length === 0 ? (
+        {connecteamConnections.length === 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>No visible Connecteam connections</CardTitle>
+              <CardDescription>
+                Create a Connecteam connection above to store an API key and validate account access.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        ) : null}
+
+        {connecteamConnections.map((connection) => {
+          const account = ((connection.metadata as { account?: unknown } | null)?.account as
+            | { name?: string | null; email?: string | null; timezone?: string | null; country?: string | null }
+            | undefined) ?? {};
+
+          return (
+            <Card key={connection.id}>
+              <CardHeader className="gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle>{connection.name}</CardTitle>
+                  <Badge className={badgeClassName(connection.status)}>{connection.status}</Badge>
+                  {connection.last_validation_status ? (
+                    <Badge className={badgeClassName(connection.last_validation_status)}>
+                      {connection.last_validation_status}
+                    </Badge>
+                  ) : null}
+                </div>
+                <CardDescription>{connection.client?.name ?? "Unknown client"} · Connecteam</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="grid gap-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
+                  <div>
+                    <p className="font-medium text-foreground">Credential</p>
+                    <p>API key</p>
+                    <p className="text-xs">Stored server-side only</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Validation</p>
+                    <p>{formatDateTime(connection.last_validated_at)}</p>
+                    <p className="text-xs">{connection.last_validation_status ?? "Not validated yet"}</p>
+                    <p className="text-xs">Account {connection.external_account_id ?? "n/a"}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Account</p>
+                    <p>{account.name ?? "Unknown account"}</p>
+                    <p className="text-xs">{account.email ?? "No email returned"}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Client</p>
+                    <p>{connection.client?.name ?? "Unknown client"}</p>
+                    <p className="text-xs">Slug {connection.client?.slug ?? "n/a"}</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
+                  <div>
+                    <p className="font-medium text-foreground">Last sync</p>
+                    <p>{formatDateTime(connection.last_synced_at)}</p>
+                    <p className="text-xs">Scheduler shifts will be used in later sync milestones</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Timezone</p>
+                    <p>{account.timezone ?? "n/a"}</p>
+                    <p className="text-xs">Country {account.country ?? "n/a"}</p>
+                  </div>
+                </div>
+
+                {connection.last_validation_error ? (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+                    {connection.last_validation_error}
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap gap-3">
+                  <form action={testConnecteamConnectionAction}>
+                    <input name="connectionId" type="hidden" value={connection.id} />
+                    <Button type="submit">Test connection</Button>
+                  </form>
+                  <form action={disconnectConnecteamConnectionAction}>
+                    <input name="connectionId" type="hidden" value={connection.id} />
+                    <Button type="submit" variant="outline">
+                      Disconnect
+                    </Button>
+                  </form>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+
+        {zendeskConnections.length === 0 ? (
           <Card>
             <CardHeader>
               <CardTitle>No visible Zendesk connections</CardTitle>
@@ -178,7 +339,7 @@ export default async function ConnectionsPage({
           </Card>
         ) : null}
 
-        {connections.map((connection) => (
+        {zendeskConnections.map((connection) => (
           <Card key={connection.id}>
             <CardHeader className="gap-3">
               <div className="flex flex-wrap items-center gap-2">
