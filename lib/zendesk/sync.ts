@@ -3,24 +3,19 @@ import "server-only";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import {
   ZendeskClient,
-  type ZendeskConnectionCredentials,
   type ZendeskTicketMetricRecord,
   type ZendeskTicketRecord,
   type ZendeskUserRecord
 } from "@/lib/zendesk/client";
+import { ensureValidZendeskCredentials, type ZendeskCredentialRow } from "@/lib/zendesk/oauth";
 
 type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
 type AdminSupabaseClient = ReturnType<typeof createAdminSupabaseClient>;
 
-type ConnectionRow = {
+type ConnectionRow = ZendeskCredentialRow & {
   id: string;
   client_id: string;
   name: string;
-  subdomain: string;
-  access_token_encrypted: string | null;
-  api_user_email: string | null;
-  credential_type: "api_token" | "oauth_token";
-  status: "active" | "disconnected" | "error";
   sync_status: "idle" | "running" | "error";
   sync_lock_expires_at: string | null;
   last_synced_at: string | null;
@@ -112,19 +107,6 @@ function numericMinutes(value?: { calendar?: number | null } | null) {
   return typeof value?.calendar === "number" ? value.calendar : null;
 }
 
-function buildCredentials(connection: ConnectionRow): ZendeskConnectionCredentials {
-  if (!connection.access_token_encrypted) {
-    throw new Error("Zendesk connection is missing access_token_encrypted.");
-  }
-
-  return {
-    subdomain: connection.subdomain,
-    credentialType: connection.credential_type,
-    accessToken: connection.access_token_encrypted,
-    apiUserEmail: connection.api_user_email
-  };
-}
-
 async function getBackfill(
   supabase: AdminSupabaseClient,
   connectionId: string
@@ -166,7 +148,7 @@ async function claimConnection(supabase: AdminSupabaseClient, connectionId: stri
     .eq("id", connectionId)
     .neq("sync_status", "running")
     .select(
-      "id,client_id,name,subdomain,access_token_encrypted,api_user_email,credential_type,status,sync_status,sync_lock_expires_at,last_synced_at,tickets_synced_through,ticket_metrics_synced_through,agents_synced_through"
+      "id,client_id,name,subdomain,access_token_encrypted,refresh_token_encrypted,api_user_email,credential_type,token_expires_at,refresh_token_expires_at,token_type,status,external_account_id,metadata,sync_status,sync_lock_expires_at,last_synced_at,tickets_synced_through,ticket_metrics_synced_through,agents_synced_through"
     )
     .maybeSingle();
 
@@ -731,7 +713,7 @@ async function runConnectionSync(
   const run = await createRun(supabase, connection, trigger, syncMode);
 
   try {
-    const client = new ZendeskClient(buildCredentials(connection));
+    const client = new ZendeskClient(await ensureValidZendeskCredentials(connection));
     const result =
       syncMode === "backfill"
         ? await runBackfillSync(supabase, connection, client, run.id, backfillPageBudget)
@@ -789,7 +771,7 @@ async function listEligibleConnections(
   let query = supabase
     .from("zendesk_connections")
     .select(
-      "id,client_id,name,subdomain,access_token_encrypted,api_user_email,credential_type,status,sync_status,sync_lock_expires_at,last_synced_at,tickets_synced_through,ticket_metrics_synced_through,agents_synced_through"
+      "id,client_id,name,subdomain,access_token_encrypted,refresh_token_encrypted,api_user_email,credential_type,token_expires_at,refresh_token_expires_at,token_type,status,external_account_id,metadata,sync_status,sync_lock_expires_at,last_synced_at,tickets_synced_through,ticket_metrics_synced_through,agents_synced_through"
     )
     .eq("status", "active")
     .order("last_synced_at", { ascending: true, nullsFirst: true });
@@ -812,7 +794,7 @@ export async function enqueueZendeskBackfill(connectionId: string, reset = false
   const { data, error } = await supabase
     .from("zendesk_connections")
     .select(
-      "id,client_id,name,subdomain,access_token_encrypted,api_user_email,credential_type,status,sync_status,sync_lock_expires_at,last_synced_at,tickets_synced_through,ticket_metrics_synced_through,agents_synced_through"
+      "id,client_id,name,subdomain,access_token_encrypted,refresh_token_encrypted,api_user_email,credential_type,token_expires_at,refresh_token_expires_at,token_type,status,external_account_id,metadata,sync_status,sync_lock_expires_at,last_synced_at,tickets_synced_through,ticket_metrics_synced_through,agents_synced_through"
     )
     .eq("id", connectionId)
     .single();

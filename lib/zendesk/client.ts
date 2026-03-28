@@ -226,6 +226,12 @@ export class ZendeskClient {
     });
   }
 
+  async getCurrentUser(): Promise<ZendeskUserRecord | null> {
+    const response = await this.request(new URL(`${this.baseUrl}/users/me.json`));
+    const payload = (await response.json()) as { user?: ZendeskUserRecord | null };
+    return payload.user ?? null;
+  }
+
   private async listResource<T>(options: {
     path: string;
     key: string;

@@ -7,8 +7,17 @@ type ConnectionStatusRow = {
   client_id: string;
   name: string;
   subdomain: string;
+  credential_type: string;
+  external_account_id: string | null;
   status: string;
   sync_status: string;
+  token_type: string | null;
+  token_expires_at: string | null;
+  refresh_token_expires_at: string | null;
+  last_validated_at: string | null;
+  last_validation_status: string | null;
+  last_validation_error: string | null;
+  metadata: Record<string, unknown> | null;
   last_synced_at: string | null;
   last_sync_started_at: string | null;
   last_sync_completed_at: string | null;
@@ -41,14 +50,31 @@ type BackfillRow = {
   last_error: string | null;
 };
 
+export async function getVisibleClients() {
+  const supabase = createServerSupabaseClient().schema("app");
+  const { data, error } = await supabase.from("clients").select("id,name,slug").order("name");
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []) as Array<{ id: string; name: string; slug: string }>;
+}
+
 export async function getZendeskConnectionStatus() {
   const supabase = createServerSupabaseClient().schema("app");
-  const [{ data: connections, error: connectionsError }, { data: runs, error: runsError }, { data: backfills, error: backfillsError }] =
+  const [
+    { data: clients, error: clientsError },
+    { data: connections, error: connectionsError },
+    { data: runs, error: runsError },
+    { data: backfills, error: backfillsError }
+  ] =
     await Promise.all([
+      supabase.from("clients").select("id,name,slug").order("name"),
       supabase
         .from("zendesk_connections")
         .select(
-          "id,client_id,name,subdomain,status,sync_status,last_synced_at,last_sync_started_at,last_sync_completed_at,last_sync_status,last_sync_error,tickets_synced_through,ticket_metrics_synced_through,agents_synced_through"
+          "id,client_id,name,subdomain,credential_type,external_account_id,status,sync_status,token_type,token_expires_at,refresh_token_expires_at,last_validated_at,last_validation_status,last_validation_error,metadata,last_synced_at,last_sync_started_at,last_sync_completed_at,last_sync_status,last_sync_error,tickets_synced_through,ticket_metrics_synced_through,agents_synced_through"
         )
         .order("name"),
       supabase
@@ -62,6 +88,10 @@ export async function getZendeskConnectionStatus() {
         .from("zendesk_backfills")
         .select("zendesk_connection_id,status,phase,progress,updated_at,completed_at,last_error")
     ]);
+
+  if (clientsError) {
+    throw clientsError;
+  }
 
   if (connectionsError) {
     throw connectionsError;
@@ -85,9 +115,13 @@ export async function getZendeskConnectionStatus() {
   const backfillByConnection = new Map(
     ((backfills ?? []) as BackfillRow[]).map((backfill) => [backfill.zendesk_connection_id, backfill])
   );
+  const clientById = new Map(
+    ((clients ?? []) as Array<{ id: string; name: string; slug: string }>).map((client) => [client.id, client])
+  );
 
   return ((connections ?? []) as ConnectionStatusRow[]).map((connection) => ({
     ...connection,
+    client: clientById.get(connection.client_id) ?? null,
     latestRun: latestRunByConnection.get(connection.id) ?? null,
     backfill: backfillByConnection.get(connection.id) ?? null
   }));

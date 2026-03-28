@@ -19,6 +19,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 CRON_SECRET=...
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
+ZENDESK_OAUTH_CLIENT_ID=...
+ZENDESK_OAUTH_CLIENT_SECRET=...
+ZENDESK_OAUTH_SCOPES=read write
 ```
 
 No secrets are committed. The app only references environment variable names.
@@ -38,11 +41,18 @@ Run the app locally with `npm run dev`.
 - The sync engine reads existing `app.zendesk_connections` rows and expects server-usable credentials:
   - `credential_type = 'api_token'` with `api_user_email` and `access_token_encrypted` populated
   - or `credential_type = 'oauth_token'` with `access_token_encrypted` populated
+- OAuth tokens are currently stored in the existing `*_encrypted` columns as application-managed secrets. This milestone keeps the storage explicit but does not add in-app encryption; database and environment handling must therefore be treated as trusted infrastructure.
 - Cron ingestion lives at `/api/cron/zendesk-sync` and requires `Authorization: Bearer $CRON_SECRET` or `?secret=$CRON_SECRET`.
 - Manual admin-triggered runs post to `/api/admin/zendesk-sync`.
 - Durable sync state is stored in `app.zendesk_sync_runs`, `app.zendesk_backfills`, and the watermark/status columns on `app.zendesk_connections`.
 - Ticket payloads are stored in `app.tickets.raw_payload`, channel type is stored in `app.tickets.channel`, and agent records land in `app.zendesk_agents`.
 - Cron runs process up to three active connections per invocation and backfills advance in small cursor chunks so long histories can resume safely.
+- OAuth connection management lives on `/connections` for admins:
+  - choose the app client, optional connection label, and Zendesk subdomain
+  - start the Zendesk OAuth flow against `https://{subdomain}.zendesk.com`
+  - callback returns to `/auth/callback/zendesk`, exchanges the code, validates `/api/v2/users/me`, and stores tokens plus expiry and validation metadata
+  - admins can test, re-authorize, and disconnect existing connections
+- OAuth refresh is handled server-side before sync and test requests. If Zendesk omits `expires_in`, the app refreshes when using a stored refresh token so later sync jobs still receive a current bearer token.
 
 ## Auth flow
 
