@@ -1,7 +1,9 @@
+import { DashboardViewSwitcher } from "@/components/dashboard/dashboard-view-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { type DashboardView } from "@/lib/metrics/dashboard";
 
 type ClientOption = {
   id: string;
@@ -19,7 +21,9 @@ export function DashboardFilters({
   role,
   filters,
   clients,
-  agents
+  agents,
+  view,
+  queryState
 }: {
   role: string;
   filters: {
@@ -30,6 +34,18 @@ export function DashboardFilters({
   };
   clients: ClientOption[];
   agents: AgentOption[];
+  view: DashboardView;
+  queryState: {
+    start: string;
+    end: string;
+    client: string;
+    agent: string;
+    view: string;
+    agentSort: string;
+    agentDir: string;
+    clientSort: string;
+    clientDir: string;
+  };
 }) {
   return (
     <Card className="border-primary/10 bg-card/95">
@@ -43,9 +59,15 @@ export function DashboardFilters({
             and then read back into the dashboard.
           </CardDescription>
         </div>
+        <DashboardViewSwitcher params={queryState} view={view} />
       </CardHeader>
       <CardContent>
         <form className="grid gap-4 lg:grid-cols-5">
+          <input name="view" type="hidden" value={queryState.view} />
+          <input name="agentSort" type="hidden" value={queryState.agentSort} />
+          <input name="agentDir" type="hidden" value={queryState.agentDir} />
+          <input name="clientSort" type="hidden" value={queryState.clientSort} />
+          <input name="clientDir" type="hidden" value={queryState.clientDir} />
           <div className="space-y-2">
             <Label htmlFor="start">Start date</Label>
             <input

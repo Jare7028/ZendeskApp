@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 
+import { AgentLeaderboardTable } from "@/components/dashboard/agent-leaderboard-table";
+import { ClientComparisonView } from "@/components/dashboard/client-comparison-view";
 import { ChannelStackedCard } from "@/components/dashboard/channel-stacked-card";
 import { DashboardFilters } from "@/components/dashboard/dashboard-filters";
 import { LineChartCard } from "@/components/dashboard/line-chart-card";
@@ -46,6 +48,11 @@ export default async function DashboardPage({
     agent?: string;
     start?: string;
     end?: string;
+    view?: string;
+    agentSort?: string;
+    agentDir?: string;
+    clientSort?: string;
+    clientDir?: string;
   };
 }) {
   const context = await getCurrentUserContext();
@@ -62,7 +69,19 @@ export default async function DashboardPage({
         agents={dashboard.agentOptions}
         clients={dashboard.visibleClients}
         filters={dashboard.filters}
+        queryState={{
+          start: dashboard.filters.startDate,
+          end: dashboard.filters.endDate,
+          client: dashboard.filters.clientId,
+          agent: dashboard.filters.agentId,
+          view: dashboard.view,
+          agentSort: dashboard.leaderboard.sort.key,
+          agentDir: dashboard.leaderboard.sort.direction,
+          clientSort: dashboard.clients.sort.key,
+          clientDir: dashboard.clients.sort.direction
+        }}
         role={context.role}
+        view={dashboard.view}
       />
 
       {!dashboard.hasVisibleClients ? (
@@ -74,7 +93,43 @@ export default async function DashboardPage({
           </p>
         </section>
       ) : (
-        <>
+        dashboard.view === "agents" ? (
+          <AgentLeaderboardTable
+            params={{
+              start: dashboard.filters.startDate,
+              end: dashboard.filters.endDate,
+              client: dashboard.filters.clientId,
+              agent: dashboard.filters.agentId,
+              view: dashboard.view,
+              agentSort: dashboard.leaderboard.sort.key,
+              agentDir: dashboard.leaderboard.sort.direction,
+              clientSort: dashboard.clients.sort.key,
+              clientDir: dashboard.clients.sort.direction
+            }}
+            rows={dashboard.leaderboard.rows}
+            selectedAgentName={dashboard.selectedAgent?.name ?? null}
+            sort={dashboard.leaderboard.sort}
+          />
+        ) : dashboard.view === "clients" ? (
+          <ClientComparisonView
+            hardestClientId={dashboard.clients.hardestClientId}
+            easiestClientId={dashboard.clients.easiestClientId}
+            params={{
+              start: dashboard.filters.startDate,
+              end: dashboard.filters.endDate,
+              client: dashboard.filters.clientId,
+              agent: dashboard.filters.agentId,
+              view: dashboard.view,
+              agentSort: dashboard.leaderboard.sort.key,
+              agentDir: dashboard.leaderboard.sort.direction,
+              clientSort: dashboard.clients.sort.key,
+              clientDir: dashboard.clients.sort.direction
+            }}
+            rows={dashboard.clients.rows}
+            sort={dashboard.clients.sort}
+          />
+        ) : (
+          <>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               title="Interactions per hour worked"
@@ -159,7 +214,8 @@ export default async function DashboardPage({
             description="Daily interaction mix by channel. Email, chat, phone, and all remaining sources are broken out."
             title="Channel mix over time"
           />
-        </>
+          </>
+        )
       )}
     </div>
   );
