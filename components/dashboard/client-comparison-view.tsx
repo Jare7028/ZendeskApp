@@ -29,6 +29,14 @@ function formatPercent(value: number | null) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function formatCompliancePercent(value: number | null) {
+  if (value === null || !Number.isFinite(value)) {
+    return "No target";
+  }
+
+  return `${value.toFixed(1)}%`;
+}
+
 function formatMinutes(value: number | null) {
   if (value === null || !Number.isFinite(value)) {
     return "No data";
@@ -200,6 +208,9 @@ export function ClientComparisonView({
                       />
                     </th>
                     <th className="px-3 pb-2 text-right">
+                      <span className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">SLA</span>
+                    </th>
+                    <th className="px-3 pb-2 text-right">
                       <SortLink
                         activeKey={sort.key}
                         direction={sort.direction}
@@ -233,6 +244,16 @@ export function ClientComparisonView({
                       <td className="px-3 py-3 text-right text-sm">{formatMinutes(row.avgFirstReplyMinutes)}</td>
                       <td className="px-3 py-3 text-right text-sm">{formatMinutes(row.avgFullResolutionMinutes)}</td>
                       <td className="px-3 py-3 text-right text-sm">{formatPercent(row.utilisation)}</td>
+                      <td className="px-3 py-3 text-right text-sm">
+                        {formatCompliancePercent(
+                          row.firstReplyComplianceRate !== null
+                            ? Math.min(
+                                row.firstReplyComplianceRate,
+                                row.fullResolutionComplianceRate ?? row.firstReplyComplianceRate
+                              )
+                            : row.fullResolutionComplianceRate
+                        )}
+                      </td>
                       <td className="px-3 py-3 text-right text-sm">{formatNumber(row.repliesPerTicket, 2)}</td>
                       <td className="rounded-r-2xl px-3 py-3 text-sm">
                         <CapacityBadge label={row.capacityLabel} tone={row.capacityTone} />

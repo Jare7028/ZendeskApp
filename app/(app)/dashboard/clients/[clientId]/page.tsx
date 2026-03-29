@@ -7,6 +7,7 @@ import { ExportControls } from "@/components/dashboard/export-controls";
 import { GranularityToggle } from "@/components/dashboard/granularity-toggle";
 import { LineChartCard } from "@/components/dashboard/line-chart-card";
 import { MetricCard } from "@/components/dashboard/metric-card";
+import { SlaComplianceCard } from "@/components/dashboard/sla-compliance-card";
 import { ServiceLevelCard } from "@/components/dashboard/service-level-card";
 import { buildDashboardHref, buildHref } from "@/components/dashboard/dashboard-query";
 import { Badge } from "@/components/ui/badge";
@@ -121,6 +122,32 @@ export default async function ClientDetailPage({
           </CardContent>
         </Card>
         <GranularityToggle granularity={detail.granularity} params={baseParams} pathname={`/dashboard/clients/${detail.client.id}`} />
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        {detail.sla ? (
+          <>
+            <SlaComplianceCard
+              description={`${detail.client.name} first reply target for the selected window`}
+              metric={detail.sla.firstReply}
+              title="First reply SLA"
+            />
+            <SlaComplianceCard
+              description={`${detail.client.name} resolution target for the selected window`}
+              metric={detail.sla.fullResolution}
+              title="Full resolution SLA"
+            />
+          </>
+        ) : (
+          <Card className="xl:col-span-2">
+            <CardHeader>
+              <CardTitle>SLA targets not configured</CardTitle>
+              <CardDescription>
+                This client does not yet have an SLA target on its active Zendesk connection.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        )}
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">

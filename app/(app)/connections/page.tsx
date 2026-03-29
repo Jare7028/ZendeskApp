@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getCurrentUserContext } from "@/lib/auth/session";
+import { readSlaConfig } from "@/lib/sla/config";
 import { getConnecteamConnectionStatus } from "@/lib/connecteam/status";
 import { getVisibleClients, getZendeskConnectionStatus } from "@/lib/zendesk/status";
 import {
@@ -14,6 +15,7 @@ import {
   disconnectConnecteamConnectionAction,
   disconnectZendeskConnectionAction,
   reauthZendeskConnectionAction,
+  saveZendeskSlaConfigAction,
   testConnecteamConnectionAction,
   testZendeskConnectionAction
 } from "./actions";
@@ -79,6 +81,12 @@ function formatConnectionMessage(status: string | undefined, detail: string | un
       return { tone: "error", message: `Zendesk OAuth failed${suffix}.` } satisfies FlashMessage;
     case "test-failed":
       return { tone: "error", message: `Zendesk connection test failed${suffix}.` } satisfies FlashMessage;
+    case "sla-saved":
+      return { tone: "success", message: "SLA settings saved successfully." } satisfies FlashMessage;
+    case "sla-invalid":
+      return { tone: "error", message: "SLA settings must use positive minute targets and a 0-100 threshold." } satisfies FlashMessage;
+    case "sla-save-failed":
+      return { tone: "error", message: `SLA settings could not be saved${suffix}.` } satisfies FlashMessage;
     default:
       return { tone: "error", message: `Connection action returned: ${status}${suffix}.` } satisfies FlashMessage;
   }
@@ -126,7 +134,8 @@ export default async function ConnectionsPage({
       <div className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Connections</h1>
         <p className="text-sm text-muted-foreground">
-          Create, validate, re-authorize, and disconnect Zendesk and Connecteam connections for each client tenant.
+          Create, validate, re-authorize, and disconnect Zendesk and Connecteam connections for each client tenant,
+          then store per-client SLA targets on the active Zendesk connection.
         </p>
       </div>
 
@@ -356,7 +365,82 @@ export default async function ConnectionsPage({
                 {connection.client?.name ?? "Unknown client"} · {connection.subdomain}.zendesk.com
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-5">
+            <CardContent className="space-y-6">
+              {(() => {
+                const sla = readSlaConfig(connection.metadata);
+
+                return (
+                  <div className="rounded-[24px] border border-primary/10 bg-muted/20 p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <h3 className="text-base font-semibold text-foreground">Client SLA settings</h3>
+                        <p className="text-sm text-muted-foreground">
+                          These targets drive dashboard compliance cards and admin alerts for this client.
+                        </p>
+                      </div>
+                      <Badge className={badgeClassName(sla?.alertsEnabled ? "active" : "disconnected")}>
+                        {sla?.alertsEnabled ? "alerts enabled" : "alerts disabled"}
+                      </Badge>
+                    </div>
+
+                    <form action={saveZendeskSlaConfigAction} className="mt-5 grid gap-4 lg:grid-cols-4">
+                      <input name="connectionId" type="hidden" value={connection.id} />
+                      <div className="space-y-2">
+                        <Label htmlFor={`sla-first-reply-${connection.id}`}>First reply target (minutes)</Label>
+                        <Input
+                          defaultValue={sla?.firstReplyTargetMinutes ?? 60}
+                          id={`sla-first-reply-${connection.id}`}
+                          min={1}
+                          name="firstReplyTargetMinutes"
+                          required
+                          type="number"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`sla-resolution-${connection.id}`}>Full resolution target (minutes)</Label>
+                        <Input
+                          defaultValue={sla?.fullResolutionTargetMinutes ?? 480}
+                          id={`sla-resolution-${connection.id}`}
+                          min={1}
+                          name="fullResolutionTargetMinutes"
+                          required
+                          type="number"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`sla-threshold-${connection.id}`}>Alert threshold (%)</Label>
+                        <Input
+                          defaultValue={sla?.alertThresholdPercent ?? 90}
+                          id={`sla-threshold-${connection.id}`}
+                          max={100}
+                          min={0}
+                          name="alertThresholdPercent"
+                          required
+                          step="0.1"
+                          type="number"
+                        />
+                      </div>
+                      <div className="flex flex-col justify-between rounded-2xl border border-border bg-background px-4 py-3">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">Alerting</p>
+                          <p className="text-xs text-muted-foreground">In-app alerts always dedupe on a cooldown.</p>
+                        </div>
+                        <label className="mt-3 flex items-center gap-2 text-sm text-foreground">
+                          <input defaultChecked={sla?.alertsEnabled ?? true} name="alertsEnabled" type="checkbox" />
+                          Enable breach alerts
+                        </label>
+                      </div>
+                      <div className="lg:col-span-4 flex flex-wrap items-center gap-3">
+                        <Button type="submit">Save SLA settings</Button>
+                        <p className="text-xs text-muted-foreground">
+                          Default cooldown is 6 hours for repeated alerts on the same breach state.
+                        </p>
+                      </div>
+                    </form>
+                  </div>
+                );
+              })()}
+
               <div className="grid gap-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
                 <div>
                   <p className="font-medium text-foreground">OAuth credentials</p>

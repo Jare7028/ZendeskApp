@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { getCurrentUserContext } from "@/lib/auth/session";
+import { mergeSlaConfigMetadata } from "@/lib/sla/config";
 import {
   disconnectConnecteamConnection,
   testConnecteamConnection
@@ -268,4 +269,62 @@ export async function disconnectConnecteamConnectionAction(formData: FormData) {
   await disconnectConnecteamConnection(connectionId);
   revalidatePath("/connections");
   redirect(buildConnectionsRedirect("connecteam-disconnected"));
+}
+
+export async function saveZendeskSlaConfigAction(formData: FormData) {
+  await requireAdmin();
+  const supabase = createServerSupabaseClient().schema("app");
+  const connectionId = String(formData.get("connectionId") ?? "").trim();
+  const firstReplyTargetMinutes = Number.parseInt(String(formData.get("firstReplyTargetMinutes") ?? ""), 10);
+  const fullResolutionTargetMinutes = Number.parseInt(String(formData.get("fullResolutionTargetMinutes") ?? ""), 10);
+  const alertThresholdPercent = Number.parseFloat(String(formData.get("alertThresholdPercent") ?? ""));
+  const alertsEnabled = String(formData.get("alertsEnabled") ?? "") === "on";
+
+  if (!connectionId) {
+    redirect(buildConnectionsRedirect("missing-connection"));
+  }
+
+  if (
+    !Number.isFinite(firstReplyTargetMinutes) ||
+    firstReplyTargetMinutes <= 0 ||
+    !Number.isFinite(fullResolutionTargetMinutes) ||
+    fullResolutionTargetMinutes <= 0 ||
+    !Number.isFinite(alertThresholdPercent) ||
+    alertThresholdPercent < 0 ||
+    alertThresholdPercent > 100
+  ) {
+    redirect(buildConnectionsRedirect("sla-invalid"));
+  }
+
+  const { data: connection, error: connectionError } = await supabase
+    .from("zendesk_connections")
+    .select("id,metadata")
+    .eq("id", connectionId)
+    .single();
+
+  if (connectionError || !connection) {
+    redirect(buildConnectionsRedirect("missing-connection"));
+  }
+
+  const { error: updateError } = await supabase
+    .from("zendesk_connections")
+    .update({
+      metadata: mergeSlaConfigMetadata(connection.metadata as Record<string, unknown> | null, {
+        firstReplyTargetMinutes,
+        fullResolutionTargetMinutes,
+        alertThresholdPercent,
+        alertsEnabled,
+        cooldownMinutes: 360
+      })
+    })
+    .eq("id", connectionId);
+
+  if (updateError) {
+    redirect(buildConnectionsRedirect("sla-save-failed", updateError.message));
+  }
+
+  revalidatePath("/connections");
+  revalidatePath("/dashboard");
+  revalidatePath("/admin");
+  redirect(buildConnectionsRedirect("sla-saved"));
 }

@@ -42,3 +42,18 @@ export function getZendeskOauthClientSecret() {
 export function getZendeskOauthScopes() {
   return process.env.ZENDESK_OAUTH_SCOPES?.trim() || "read write";
 }
+
+export function getResendApiKey() {
+  return process.env.RESEND_API_KEY?.trim() || null;
+}
+
+export function getSlaAlertEmailFrom() {
+  return process.env.SLA_ALERT_EMAIL_FROM?.trim() || null;
+}
+
+export function getSlaAlertEmailToOverride() {
+  return (process.env.SLA_ALERT_EMAIL_TO ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
