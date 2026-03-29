@@ -1,9 +1,12 @@
 import { redirect } from "next/navigation";
 
+import { SlaAlertFeed } from "@/components/dashboard/sla-alert-feed";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUserContext } from "@/lib/auth/session";
+import { getSlaAlertFeed } from "@/lib/sla/alerts";
+import { readSlaConfig } from "@/lib/sla/config";
 import { getConnecteamAdminOverview } from "@/lib/connecteam/status";
 import { getZendeskConnectionStatus } from "@/lib/zendesk/status";
 import { saveAgentMappingOverrideAction } from "./actions";
@@ -79,9 +82,10 @@ export default async function AdminPage({
     redirect("/dashboard");
   }
 
-  const [zendeskConnections, connecteamConnections] = await Promise.all([
+  const [zendeskConnections, connecteamConnections, alerts] = await Promise.all([
     getZendeskConnectionStatus(),
-    getConnecteamAdminOverview()
+    getConnecteamAdminOverview(),
+    getSlaAlertFeed()
   ]);
   const flashMessage = formatSyncMessage(searchParams?.sync, searchParams?.detail);
 
@@ -100,6 +104,11 @@ export default async function AdminPage({
           <CardContent className="pt-6 text-sm text-muted-foreground">{flashMessage}</CardContent>
         </Card>
       ) : null}
+
+      <SlaAlertFeed
+        alerts={alerts}
+        description="Deduped SLA breach records for admins. Email delivery is optional and only runs when configured."
+      />
 
       <section className="grid gap-4">
         {zendeskConnections.length === 0 ? (
@@ -129,6 +138,25 @@ export default async function AdminPage({
               <CardDescription>{connection.subdomain}.zendesk.com</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
+              {(() => {
+                const sla = readSlaConfig(connection.metadata);
+
+                return sla ? (
+                  <div className="rounded-2xl border border-primary/10 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                    <p className="font-medium text-foreground">SLA configuration</p>
+                    <p>
+                      First reply {sla.firstReplyTargetMinutes}m · Full resolution {sla.fullResolutionTargetMinutes}m
+                    </p>
+                    <p className="text-xs">
+                      Alert threshold {sla.alertThresholdPercent.toFixed(1)}% · Alerts {sla.alertsEnabled ? "enabled" : "disabled"} · Cooldown {sla.cooldownMinutes}m
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                    No SLA target configured on this connection yet.
+                  </div>
+                );
+              })()}
               <div className="grid gap-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
                 <div>
                   <p className="font-medium text-foreground">Connection status</p>

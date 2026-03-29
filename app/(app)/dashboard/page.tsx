@@ -7,6 +7,8 @@ import { DashboardFilters } from "@/components/dashboard/dashboard-filters";
 import { ExportControls } from "@/components/dashboard/export-controls";
 import { LineChartCard } from "@/components/dashboard/line-chart-card";
 import { MetricCard } from "@/components/dashboard/metric-card";
+import { SlaAlertFeed } from "@/components/dashboard/sla-alert-feed";
+import { SlaComplianceCard } from "@/components/dashboard/sla-compliance-card";
 import { ServiceLevelCard } from "@/components/dashboard/service-level-card";
 import { buildHref } from "@/components/dashboard/dashboard-query";
 import { getCurrentUserContext } from "@/lib/auth/session";
@@ -64,7 +66,9 @@ export default async function DashboardPage({
     redirect("/login");
   }
 
-  const dashboard = await getDashboardData(searchParams);
+  const dashboard = await getDashboardData(searchParams, {
+    includeAdminAlerts: context.role === "admin"
+  });
 
   return (
     <div className="space-y-8">
@@ -168,6 +172,28 @@ export default async function DashboardPage({
               }, { report: "overview" })}
             />
           </section>
+          {context.role === "admin" ? <SlaAlertFeed alerts={dashboard.alerts} /> : null}
+          {dashboard.sla ? (
+            <section className="grid gap-4 xl:grid-cols-2">
+              <SlaComplianceCard
+                description="Client-specific targets rolled into the current portfolio scope."
+                metric={dashboard.sla.firstReply}
+                targetLabel="Client-specific"
+                title="First reply SLA"
+              />
+              <SlaComplianceCard
+                description="Compliance across configured clients in the selected window."
+                metric={dashboard.sla.fullResolution}
+                targetLabel="Client-specific"
+                title="Full resolution SLA"
+              />
+            </section>
+          ) : (
+            <section className="rounded-[28px] border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">
+              SLA targets have not been configured for the visible client scope yet. Admins can add them on the
+              Connections page to unlock compliance tracking and alerts.
+            </section>
+          )}
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               title="Interactions per hour worked"
@@ -216,9 +242,6 @@ export default async function DashboardPage({
               p90={dashboard.overview.p90FullResolutionMinutes}
               title="Full resolution time"
             />
-          </section>
-
-          <section className="grid gap-4 xl:grid-cols-2">
             <LineChartCard
               data={dashboard.trends.volume.map((point) => ({
                 date: point.date,

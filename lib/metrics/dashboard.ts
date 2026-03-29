@@ -1,6 +1,13 @@
 import "server-only";
 
 import { recomputeComputedMetricsForDateRange } from "@/lib/metrics/compute";
+import {
+  ensureSlaAlertEvents,
+  getSlaAlertFeed,
+  type SlaAlertCandidate,
+  type SlaAlertFeedItem
+} from "@/lib/sla/alerts";
+import { readSlaConfig, type SlaConfig } from "@/lib/sla/config";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getVisibleClients } from "@/lib/zendesk/status";
 
@@ -61,13 +68,33 @@ type ComputedMetricRow = {
 type TicketRow = {
   id: string;
   client_id: string;
-  raw_payload: JsonObject | null;
+  zendesk_connection_id: string;
+  agent_mapping_id: string | null;
 };
 
 type TicketMetricRow = {
   ticket_id: string;
   first_response_minutes: number | null;
   full_resolution_minutes: number | null;
+  payload: JsonObject | null;
+};
+
+type ZendeskConnectionRow = {
+  id: string;
+  client_id: string;
+  name: string;
+  status: string;
+  updated_at: string;
+  metadata: Record<string, unknown> | null;
+};
+
+type ServiceMetricWindowRow = {
+  ticketId: string;
+  clientId: string;
+  zendeskConnectionId: string;
+  agentMappingId: string | null;
+  firstResponseMinutes: number | null;
+  fullResolutionMinutes: number | null;
   payload: JsonObject | null;
 };
 
@@ -99,6 +126,28 @@ type ServiceStats = {
   medianFullResolutionMinutes: number | null;
   p90FullResolutionMinutes: number | null;
   requesterWaitTimeMinutes: number | null;
+};
+
+export type SlaStatusTone = "healthy" | "warning" | "breach" | "inactive" | "unconfigured";
+
+export type SlaMetricCompliance = {
+  targetMinutes: number | null;
+  complianceRate: number | null;
+  compliantCount: number;
+  breachCount: number;
+  measuredCount: number;
+  thresholdPercent: number | null;
+  status: SlaStatusTone;
+};
+
+export type SlaSummary = {
+  connectionId: string | null;
+  connectionName: string | null;
+  thresholdPercent: number | null;
+  alertsEnabled: boolean;
+  firstReply: SlaMetricCompliance;
+  fullResolution: SlaMetricCompliance;
+  breached: boolean;
 };
 
 export type DashboardOverview = {
@@ -146,6 +195,9 @@ export type ClientComparisonRow = {
   capacityLabel: string;
   capacityTone: CapacityStatusTone;
   capacityDetail: string;
+  firstReplyComplianceRate: number | null;
+  fullResolutionComplianceRate: number | null;
+  slaStatus: SlaStatusTone;
 };
 
 type MetricSummary = {
@@ -182,6 +234,21 @@ type DashboardScope = {
   clientDir: SortDirection;
 };
 
+type ClientSlaConfig = {
+  clientId: string;
+  clientName: string;
+  connectionId: string;
+  connectionName: string;
+  config: SlaConfig;
+};
+
+type ServiceAnalysis = {
+  serviceStats: ServiceStats;
+  overallSla: SlaSummary | null;
+  byClientSla: Map<string, SlaSummary>;
+  alertCandidates: SlaAlertCandidate[];
+};
+
 export type DashboardData = {
   filters: DashboardScope["filters"];
   view: DashboardView;
@@ -191,6 +258,8 @@ export type DashboardData = {
   selectedAgent: AgentOption | null;
   hasVisibleClients: boolean;
   overview: DashboardOverview;
+  sla: SlaSummary | null;
+  alerts: SlaAlertFeedItem[];
   trends: {
     volume: DailyVolumePoint[];
     response: DailyResponsePoint[];
@@ -214,6 +283,7 @@ export type AgentDetailData = {
   visibleClients: DashboardScope["visibleClients"];
   agent: AgentOption;
   overview: DashboardOverview;
+  sla: SlaSummary | null;
   trends: {
     volume: DailyVolumePoint[];
     response: DailyResponsePoint[];
@@ -232,6 +302,7 @@ export type ClientDetailData = {
   visibleClients: DashboardScope["visibleClients"];
   client: { id: string; name: string; slug: string };
   overview: DashboardOverview;
+  sla: SlaSummary | null;
   trends: {
     volume: DailyVolumePoint[];
     response: DailyResponsePoint[];
@@ -427,42 +498,79 @@ async function getComputedMetricsRows(options: {
   return (data ?? []) as ComputedMetricRow[];
 }
 
-async function getServiceStats(options: {
-  clientIds: string[];
-  startDate: string;
-  endDate: string;
-  zendeskAgentId?: string | null;
-}) {
-  if (options.clientIds.length === 0) {
-    return emptyServiceStats();
+async function getClientSlaConfigs(clientIds: string[]) {
+  if (clientIds.length === 0) {
+    return new Map<string, ClientSlaConfig>();
   }
 
   const supabase = createServerSupabaseClient().schema("app");
-  const { data: tickets, error: ticketsError } = await supabase
+  const { data, error } = await supabase
+    .from("zendesk_connections")
+    .select("id,client_id,name,status,updated_at,metadata")
+    .in("client_id", clientIds)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  const configsByClient = new Map<string, ClientSlaConfig>();
+
+  for (const connection of (data ?? []) as ZendeskConnectionRow[]) {
+    const config = readSlaConfig(connection.metadata);
+
+    if (!config || configsByClient.has(connection.client_id)) {
+      continue;
+    }
+
+    configsByClient.set(connection.client_id, {
+      clientId: connection.client_id,
+      clientName: "",
+      connectionId: connection.id,
+      connectionName: connection.name,
+      config
+    });
+  }
+
+  return configsByClient;
+}
+
+async function getServiceMetricWindowRows(options: {
+  clientIds: string[];
+  startDate: string;
+  endDate: string;
+  agentMappingId?: string | null;
+}) {
+  if (options.clientIds.length === 0) {
+    return [] as ServiceMetricWindowRow[];
+  }
+
+  const supabase = createServerSupabaseClient().schema("app");
+  let ticketsQuery = supabase
     .from("tickets")
-    .select("id,client_id,raw_payload")
+    .select("id,client_id,zendesk_connection_id,agent_mapping_id")
     .in("client_id", options.clientIds)
     .gte("created_at_source", `${options.startDate}T00:00:00.000Z`)
     .lte("created_at_source", `${options.endDate}T23:59:59.999Z`);
+
+  if (options.agentMappingId) {
+    ticketsQuery = ticketsQuery.eq("agent_mapping_id", options.agentMappingId);
+  }
+
+  const { data: tickets, error: ticketsError } = await ticketsQuery;
 
   if (ticketsError) {
     throw ticketsError;
   }
 
-  const filteredTickets = ((tickets ?? []) as TicketRow[]).filter((ticket) => {
-    if (!options.zendeskAgentId) {
-      return true;
-    }
+  const typedTickets = (tickets ?? []) as TicketRow[];
 
-    return String(ticket.raw_payload?.assignee_id ?? "") === options.zendeskAgentId;
-  });
-
-  if (filteredTickets.length === 0) {
-    return emptyServiceStats();
+  if (typedTickets.length === 0) {
+    return [];
   }
 
   const ticketMetricRows: TicketMetricRow[] = [];
-  const ticketIds = filteredTickets.map((ticket) => ticket.id);
+  const ticketIds = typedTickets.map((ticket) => ticket.id);
 
   for (let index = 0; index < ticketIds.length; index += 200) {
     const chunk = ticketIds.slice(index, index + 200);
@@ -478,17 +586,163 @@ async function getServiceStats(options: {
     ticketMetricRows.push(...((data ?? []) as TicketMetricRow[]));
   }
 
-  const firstReplyValues = ticketMetricRows
-    .map((row) => row.first_response_minutes)
-    .filter((value): value is number => value !== null && Number.isFinite(value));
-  const fullResolutionValues = ticketMetricRows
-    .map((row) => row.full_resolution_minutes)
-    .filter((value): value is number => value !== null && Number.isFinite(value));
-  const requesterWaitValues = ticketMetricRows
-    .map((row) => readPayloadNumber(row.payload, "requester_wait_time_in_minutes"))
-    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const ticketById = new Map(typedTickets.map((ticket) => [ticket.id, ticket]));
+
+  return ticketMetricRows
+    .map((row) => {
+      const ticket = ticketById.get(row.ticket_id);
+
+      if (!ticket) {
+        return null;
+      }
+
+      return {
+        ticketId: row.ticket_id,
+        clientId: ticket.client_id,
+        zendeskConnectionId: ticket.zendesk_connection_id,
+        agentMappingId: ticket.agent_mapping_id,
+        firstResponseMinutes: row.first_response_minutes,
+        fullResolutionMinutes: row.full_resolution_minutes,
+        payload: row.payload
+      } satisfies ServiceMetricWindowRow;
+    })
+    .filter((row): row is ServiceMetricWindowRow => row !== null);
+}
+
+function buildEmptySlaMetric(status: SlaStatusTone = "unconfigured"): SlaMetricCompliance {
+  return {
+    targetMinutes: null,
+    complianceRate: null,
+    compliantCount: 0,
+    breachCount: 0,
+    measuredCount: 0,
+    thresholdPercent: null,
+    status
+  };
+}
+
+function resolveSlaStatus(complianceRate: number | null, thresholdPercent: number | null, measuredCount: number) {
+  if (thresholdPercent === null) {
+    return "unconfigured" satisfies SlaStatusTone;
+  }
+
+  if (measuredCount === 0 || complianceRate === null) {
+    return "inactive" satisfies SlaStatusTone;
+  }
+
+  if (complianceRate < thresholdPercent) {
+    return "breach" satisfies SlaStatusTone;
+  }
+
+  if (complianceRate < thresholdPercent + 5) {
+    return "warning" satisfies SlaStatusTone;
+  }
+
+  return "healthy" satisfies SlaStatusTone;
+}
+
+function buildSlaMetric(values: number[], targetMinutes: number | null, thresholdPercent: number | null) {
+  if (targetMinutes === null || thresholdPercent === null) {
+    return buildEmptySlaMetric();
+  }
+
+  const compliantCount = values.filter((value) => value <= targetMinutes).length;
+  const measuredCount = values.length;
+  const breachCount = Math.max(measuredCount - compliantCount, 0);
+  const complianceRate = measuredCount > 0 ? (compliantCount / measuredCount) * 100 : null;
 
   return {
+    targetMinutes,
+    complianceRate,
+    compliantCount,
+    breachCount,
+    measuredCount,
+    thresholdPercent,
+    status: resolveSlaStatus(complianceRate, thresholdPercent, measuredCount)
+  } satisfies SlaMetricCompliance;
+}
+
+function resolveClientSlaStatus(summary: SlaSummary | undefined): SlaStatusTone {
+  if (!summary) {
+    return "unconfigured" satisfies SlaStatusTone;
+  }
+
+  if (summary.firstReply.status === "breach" || summary.fullResolution.status === "breach") {
+    return "breach" satisfies SlaStatusTone;
+  }
+
+  if (summary.firstReply.status === "warning" || summary.fullResolution.status === "warning") {
+    return "warning" satisfies SlaStatusTone;
+  }
+
+  if (summary.firstReply.status === "healthy" || summary.fullResolution.status === "healthy") {
+    return "healthy" satisfies SlaStatusTone;
+  }
+
+  return "inactive" satisfies SlaStatusTone;
+}
+
+function buildSlaSummary(
+  rows: ServiceMetricWindowRow[],
+  configEntry: ClientSlaConfig | null,
+  defaultStatus: SlaStatusTone = "unconfigured"
+): SlaSummary | null {
+  if (!configEntry) {
+    return {
+      connectionId: null,
+      connectionName: null,
+      thresholdPercent: null,
+      alertsEnabled: false,
+      firstReply: buildEmptySlaMetric(defaultStatus),
+      fullResolution: buildEmptySlaMetric(defaultStatus),
+      breached: false
+    };
+  }
+
+  const firstReplyValues = rows
+    .map((row) => row.firstResponseMinutes)
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const fullResolutionValues = rows
+    .map((row) => row.fullResolutionMinutes)
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const firstReply = buildSlaMetric(
+    firstReplyValues,
+    configEntry.config.firstReplyTargetMinutes,
+    configEntry.config.alertThresholdPercent
+  );
+  const fullResolution = buildSlaMetric(
+    fullResolutionValues,
+    configEntry.config.fullResolutionTargetMinutes,
+    configEntry.config.alertThresholdPercent
+  );
+
+  return {
+    connectionId: configEntry.connectionId,
+    connectionName: configEntry.connectionName,
+    thresholdPercent: configEntry.config.alertThresholdPercent,
+    alertsEnabled: configEntry.config.alertsEnabled,
+    firstReply,
+    fullResolution,
+    breached: firstReply.status === "breach" || fullResolution.status === "breach"
+  };
+}
+
+function analyseServiceRows(
+  rows: ServiceMetricWindowRow[],
+  clientNameById: Map<string, string>,
+  clientSlaConfigs: Map<string, ClientSlaConfig>,
+  window: { startDate: string; endDate: string }
+): ServiceAnalysis {
+  const firstReplyValues = rows
+    .map((row) => row.firstResponseMinutes)
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const fullResolutionValues = rows
+    .map((row) => row.fullResolutionMinutes)
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const requesterWaitValues = rows
+    .map((row) => readPayloadNumber(row.payload, "requester_wait_time_in_minutes"))
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  const serviceStats = {
     avgFirstReplyMinutes: average(firstReplyValues),
     medianFirstReplyMinutes: percentile(firstReplyValues, 0.5),
     p90FirstReplyMinutes: percentile(firstReplyValues, 0.9),
@@ -497,6 +751,126 @@ async function getServiceStats(options: {
     p90FullResolutionMinutes: percentile(fullResolutionValues, 0.9),
     requesterWaitTimeMinutes: average(requesterWaitValues)
   } satisfies ServiceStats;
+
+  const rowsByClient = new Map<string, ServiceMetricWindowRow[]>();
+
+  for (const row of rows) {
+    const list = rowsByClient.get(row.clientId) ?? [];
+    list.push(row);
+    rowsByClient.set(row.clientId, list);
+  }
+
+  const byClientSla = new Map<string, SlaSummary>();
+  const alertCandidates: SlaAlertCandidate[] = [];
+
+  for (const [clientId, clientRows] of rowsByClient.entries()) {
+    const configEntry = clientSlaConfigs.get(clientId) ?? null;
+    const summary = buildSlaSummary(clientRows, configEntry, "inactive");
+
+    if (!summary) {
+      continue;
+    }
+
+    byClientSla.set(clientId, summary);
+
+    if (configEntry) {
+      const breachedMetrics = [
+        ...(summary.firstReply.status === "breach" ? (["first_reply"] as const) : []),
+        ...(summary.fullResolution.status === "breach" ? (["full_resolution"] as const) : [])
+      ];
+
+      alertCandidates.push({
+        clientId,
+        clientName: clientNameById.get(clientId) ?? "Unknown client",
+        zendeskConnectionId: configEntry.connectionId,
+        windowStart: window.startDate,
+        windowEnd: window.endDate,
+        config: configEntry.config,
+        firstReplyCompliance: summary.firstReply.complianceRate,
+        fullResolutionCompliance: summary.fullResolution.complianceRate,
+        firstReplyMeasuredCount: summary.firstReply.measuredCount,
+        fullResolutionMeasuredCount: summary.fullResolution.measuredCount,
+        breachedMetrics
+      });
+    }
+  }
+
+  const configuredRows = rows.filter((row) => clientSlaConfigs.has(row.clientId));
+  const aggregateThresholdPercent =
+    configuredRows.length > 0
+      ? average([...clientSlaConfigs.values()].map((entry) => entry.config.alertThresholdPercent))
+      : null;
+  const overallSla =
+    aggregateThresholdPercent !== null
+      ? ({
+          connectionId: null,
+          connectionName: null,
+          thresholdPercent: aggregateThresholdPercent,
+          alertsEnabled: [...clientSlaConfigs.values()].some((entry) => entry.config.alertsEnabled),
+          firstReply: {
+            ...buildEmptySlaMetric(),
+            ...(() => {
+              const values = configuredRows
+                .map((row) => {
+                  const config = clientSlaConfigs.get(row.clientId);
+                  return (
+                    !!config &&
+                    row.firstResponseMinutes !== null &&
+                    row.firstResponseMinutes <= config.config.firstReplyTargetMinutes
+                  );
+                })
+                .filter((value): value is boolean => typeof value === "boolean");
+              const measuredCount = values.length;
+              const compliantCount = values.filter(Boolean).length;
+              const complianceRate = measuredCount > 0 ? (compliantCount / measuredCount) * 100 : null;
+              return {
+                targetMinutes: null,
+                complianceRate,
+                compliantCount,
+                breachCount: Math.max(measuredCount - compliantCount, 0),
+                measuredCount,
+                thresholdPercent: aggregateThresholdPercent,
+                status: resolveSlaStatus(complianceRate, aggregateThresholdPercent, measuredCount) as SlaStatusTone
+              };
+            })()
+          },
+          fullResolution: {
+            ...buildEmptySlaMetric(),
+            ...(() => {
+              const values = configuredRows
+                .map((row) => {
+                  const config = clientSlaConfigs.get(row.clientId);
+                  return (
+                    config &&
+                    row.fullResolutionMinutes !== null &&
+                    row.fullResolutionMinutes <= config.config.fullResolutionTargetMinutes
+                  );
+                })
+                .filter((value): value is boolean => typeof value === "boolean");
+              const measuredCount = values.length;
+              const compliantCount = values.filter(Boolean).length;
+              const complianceRate = measuredCount > 0 ? (compliantCount / measuredCount) * 100 : null;
+              return {
+                targetMinutes: null,
+                complianceRate,
+                compliantCount,
+                breachCount: Math.max(measuredCount - compliantCount, 0),
+                measuredCount,
+                thresholdPercent: aggregateThresholdPercent,
+                status: resolveSlaStatus(complianceRate, aggregateThresholdPercent, measuredCount) as SlaStatusTone
+              };
+            })()
+          },
+          breached: false as boolean
+        } satisfies SlaSummary)
+      : null;
+
+  return {
+    serviceStats,
+    overallSla,
+    byClientSla,
+    alertCandidates
+  };
 }
 
 function emptyServiceStats(): ServiceStats {
@@ -868,7 +1242,11 @@ function buildCapacityStatus(
   } satisfies Pick<ClientComparisonRow, "capacityLabel" | "capacityTone" | "capacityDetail">;
 }
 
-function buildClientComparisonRows(rows: ComputedMetricRow[], clientNameById: Map<string, string>) {
+function buildClientComparisonRows(
+  rows: ComputedMetricRow[],
+  clientNameById: Map<string, string>,
+  slaByClient: Map<string, SlaSummary>
+) {
   const grouped = new Map<string, MetricSummary>();
 
   for (const row of rows) {
@@ -927,20 +1305,24 @@ function buildClientComparisonRows(rows: ComputedMetricRow[], clientNameById: Ma
     grouped.set(row.client_id, entry);
   }
 
-  const baseRows = [...grouped.entries()].map(([clientId, metrics]) => ({
-    clientId,
-    clientName: clientNameById.get(clientId) ?? "Unknown client",
-    totalInteractions: metrics.totalInteractions,
-    totalHoursWorked: metrics.totalHoursWorked,
-    interactionsPerHourWorked:
-      metrics.totalHoursWorked > 0 ? metrics.totalInteractions / metrics.totalHoursWorked : null,
-    avgFirstReplyMinutes:
-      metrics.ticketsWithFirstReply > 0 ? metrics.totalFirstReplyMinutes / metrics.ticketsWithFirstReply : null,
-    avgFullResolutionMinutes:
-      metrics.ticketsWithResolution > 0 ? metrics.totalFullResolutionMinutes / metrics.ticketsWithResolution : null,
-    utilisation: metrics.totalHoursWorked > 0 ? metrics.totalActivityHours / metrics.totalHoursWorked : null,
-    repliesPerTicket: metrics.totalInteractions > 0 ? metrics.totalReplies / metrics.totalInteractions : null
-  }));
+  const baseRows: Array<Omit<ClientComparisonRow, "capacityLabel" | "capacityTone" | "capacityDetail">> =
+    [...grouped.entries()].map(([clientId, metrics]) => ({
+      clientId,
+      clientName: clientNameById.get(clientId) ?? "Unknown client",
+      totalInteractions: metrics.totalInteractions,
+      totalHoursWorked: metrics.totalHoursWorked,
+      interactionsPerHourWorked:
+        metrics.totalHoursWorked > 0 ? metrics.totalInteractions / metrics.totalHoursWorked : null,
+      avgFirstReplyMinutes:
+        metrics.ticketsWithFirstReply > 0 ? metrics.totalFirstReplyMinutes / metrics.ticketsWithFirstReply : null,
+      avgFullResolutionMinutes:
+        metrics.ticketsWithResolution > 0 ? metrics.totalFullResolutionMinutes / metrics.ticketsWithResolution : null,
+      utilisation: metrics.totalHoursWorked > 0 ? metrics.totalActivityHours / metrics.totalHoursWorked : null,
+      repliesPerTicket: metrics.totalInteractions > 0 ? metrics.totalReplies / metrics.totalInteractions : null,
+      firstReplyComplianceRate: slaByClient.get(clientId)?.firstReply.complianceRate ?? null,
+      fullResolutionComplianceRate: slaByClient.get(clientId)?.fullResolution.complianceRate ?? null,
+      slaStatus: resolveClientSlaStatus(slaByClient.get(clientId))
+    }));
 
   const throughputMedian = median(
     baseRows
@@ -1198,7 +1580,10 @@ async function resolveDashboardScope(searchParams: DashboardSearchParams = {}): 
   };
 }
 
-export async function getDashboardData(searchParams: DashboardSearchParams = {}): Promise<DashboardData> {
+export async function getDashboardData(
+  searchParams: DashboardSearchParams = {},
+  options: { includeAdminAlerts?: boolean } = {}
+): Promise<DashboardData> {
   const scope = await resolveDashboardScope(searchParams);
 
   if (scope.visibleClients.length === 0) {
@@ -1211,6 +1596,8 @@ export async function getDashboardData(searchParams: DashboardSearchParams = {})
       selectedAgent: null,
       hasVisibleClients: false,
       overview: emptyOverview(),
+      sla: null,
+      alerts: [],
       trends: {
         volume: [],
         response: [],
@@ -1231,7 +1618,7 @@ export async function getDashboardData(searchParams: DashboardSearchParams = {})
 
   await ensureMetrics(scope.scopedClientIds, scope.filters.startDate, scope.filters.endDate);
 
-  const [mainRows, agentRows, channelRows, clientRows, serviceStats] = await Promise.all([
+  const [mainRows, agentRows, channelRows, clientRows, serviceRows, clientSlaConfigs] = await Promise.all([
     getComputedMetricsRows({
       clientIds: scope.scopedClientIds,
       startDate: scope.filters.startDate,
@@ -1260,20 +1647,43 @@ export async function getDashboardData(searchParams: DashboardSearchParams = {})
       scope: scope.selectedAgent ? "agent" : "client",
       agentId: scope.selectedAgent?.id ?? null
     }),
-    getServiceStats({
+    getServiceMetricWindowRows({
       clientIds: scope.scopedClientIds,
       startDate: scope.filters.startDate,
       endDate: scope.filters.endDate,
-      zendeskAgentId: scope.selectedAgent?.zendeskAgentId ?? null
-    })
+      agentMappingId: scope.selectedAgent?.id ?? null
+    }),
+    getClientSlaConfigs(scope.scopedClientIds)
   ]);
 
+  for (const client of scope.visibleClients) {
+    const config = clientSlaConfigs.get(client.id);
+
+    if (config) {
+      config.clientName = client.name;
+    }
+  }
+
+  const serviceAnalysis = analyseServiceRows(serviceRows, scope.clientNameById, clientSlaConfigs, {
+    startDate: scope.filters.startDate,
+    endDate: scope.filters.endDate
+  });
+
+  if (options.includeAdminAlerts) {
+    await ensureSlaAlertEvents(serviceAnalysis.alertCandidates);
+  }
+
+  const alerts = options.includeAdminAlerts ? await getSlaAlertFeed(scope.scopedClientIds) : [];
   const leaderboardRows = sortAgentRows(
     buildAgentLeaderboardRows(agentRows, scope.agentOptions, scope.clientNameById),
     scope.agentSort,
     scope.agentDir
   );
-  const clientComparisonRows = buildClientComparisonRows(clientRows, scope.clientNameById);
+  const clientComparisonRows = buildClientComparisonRows(
+    clientRows,
+    scope.clientNameById,
+    serviceAnalysis.byClientSla
+  );
   const sortedClientRows = sortClientRows(clientComparisonRows, scope.clientSort, scope.clientDir);
   const difficultyRanking = rankClientDifficulty(clientComparisonRows);
   const activeAgentCount = scope.selectedAgent ? (leaderboardRows.length > 0 ? 1 : 0) : leaderboardRows.length;
@@ -1286,7 +1696,9 @@ export async function getDashboardData(searchParams: DashboardSearchParams = {})
     agentOptions: scope.agentOptions,
     selectedAgent: scope.selectedAgent,
     hasVisibleClients: true,
-    overview: buildOverview(mainRows, serviceStats, activeAgentCount),
+    overview: buildOverview(mainRows, serviceAnalysis.serviceStats, activeAgentCount),
+    sla: serviceAnalysis.overallSla,
+    alerts,
     trends: {
       volume: buildVolumeTrends(mainRows),
       response: buildResponseTrends(mainRows),
@@ -1324,7 +1736,7 @@ export async function getAgentDetailData(agentId: string, searchParams: Dashboar
 
   await ensureMetrics([agent.clientId], baseScope.filters.startDate, baseScope.filters.endDate);
 
-  const [agentRows, peerAgentRows, clientRows, serviceStats] = await Promise.all([
+  const [agentRows, peerAgentRows, clientRows, serviceRows, clientSlaConfigs] = await Promise.all([
     getComputedMetricsRows({
       clientIds: [agent.clientId],
       startDate: baseScope.filters.startDate,
@@ -1344,22 +1756,38 @@ export async function getAgentDetailData(agentId: string, searchParams: Dashboar
       endDate: baseScope.filters.endDate,
       scope: "client"
     }),
-    getServiceStats({
+    getServiceMetricWindowRows({
       clientIds: [agent.clientId],
       startDate: baseScope.filters.startDate,
       endDate: baseScope.filters.endDate,
-      zendeskAgentId: agent.zendeskAgentId
-    })
+      agentMappingId: agent.id
+    }),
+    getClientSlaConfigs([agent.clientId])
   ]);
 
+  const agentClientConfig = clientSlaConfigs.get(agent.clientId);
+
+  if (agentClientConfig) {
+    agentClientConfig.clientName = agent.clientName;
+  }
+  const serviceAnalysis = analyseServiceRows(serviceRows, baseScope.clientNameById, clientSlaConfigs, {
+    startDate: baseScope.filters.startDate,
+    endDate: baseScope.filters.endDate
+  });
+
   const peerRows = sortAgentRows(
-    buildAgentLeaderboardRows(peerAgentRows, visibleAgentOptions.filter((option) => option.clientId === agent.clientId), baseScope.clientNameById),
+    buildAgentLeaderboardRows(
+      peerAgentRows,
+      visibleAgentOptions.filter((option) => option.clientId === agent.clientId),
+      baseScope.clientNameById
+    ),
     baseScope.agentSort,
     baseScope.agentDir
   );
-  const clientContext = buildClientComparisonRows(clientRows, baseScope.clientNameById).find(
-    (row) => row.clientId === agent.clientId
-  ) ?? null;
+  const clientContext =
+    buildClientComparisonRows(clientRows, baseScope.clientNameById, serviceAnalysis.byClientSla).find(
+      (row) => row.clientId === agent.clientId
+    ) ?? null;
 
   return {
     filters: {
@@ -1371,7 +1799,8 @@ export async function getAgentDetailData(agentId: string, searchParams: Dashboar
     granularity: baseScope.granularity,
     visibleClients: baseScope.visibleClients,
     agent,
-    overview: buildOverview(agentRows, serviceStats, agentRows.length > 0 ? 1 : 0),
+    overview: buildOverview(agentRows, serviceAnalysis.serviceStats, agentRows.length > 0 ? 1 : 0),
+    sla: serviceAnalysis.byClientSla.get(agent.clientId) ?? null,
     trends: buildTrendSet(agentRows, baseScope.granularity),
     peers: {
       rows: peerRows,
@@ -1406,7 +1835,7 @@ export async function getClientDetailData(clientId: string, searchParams: Dashbo
   );
 
   const clientAgentOptions = await getVisibleAgents([client.id]);
-  const [clientRows, agentRows, portfolioRows, serviceStats] = await Promise.all([
+  const [clientRows, agentRows, portfolioRows, serviceRows, clientSlaConfigs] = await Promise.all([
     getComputedMetricsRows({
       clientIds: [client.id],
       startDate: baseScope.filters.startDate,
@@ -1425,12 +1854,40 @@ export async function getClientDetailData(clientId: string, searchParams: Dashbo
       endDate: baseScope.filters.endDate,
       scope: "client"
     }),
-    getServiceStats({
+    getServiceMetricWindowRows({
       clientIds: [client.id],
       startDate: baseScope.filters.startDate,
       endDate: baseScope.filters.endDate
-    })
+    }),
+    getClientSlaConfigs(baseScope.visibleClients.map((candidate) => candidate.id))
   ]);
+
+  for (const visibleClient of baseScope.visibleClients) {
+    const config = clientSlaConfigs.get(visibleClient.id);
+
+    if (config) {
+      config.clientName = visibleClient.name;
+    }
+  }
+
+  const detailServiceAnalysis = analyseServiceRows(serviceRows, baseScope.clientNameById, clientSlaConfigs, {
+    startDate: baseScope.filters.startDate,
+    endDate: baseScope.filters.endDate
+  });
+  const portfolioServiceRows = await getServiceMetricWindowRows({
+    clientIds: baseScope.visibleClients.map((candidate) => candidate.id),
+    startDate: baseScope.filters.startDate,
+    endDate: baseScope.filters.endDate
+  });
+  const portfolioServiceAnalysis = analyseServiceRows(
+    portfolioServiceRows,
+    baseScope.clientNameById,
+    clientSlaConfigs,
+    {
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate
+    }
+  );
 
   const sortedAgents = sortAgentRows(
     buildAgentLeaderboardRows(agentRows, clientAgentOptions, baseScope.clientNameById),
@@ -1438,7 +1895,9 @@ export async function getClientDetailData(clientId: string, searchParams: Dashbo
     baseScope.agentDir
   );
   const portfolioContext =
-    buildClientComparisonRows(portfolioRows, baseScope.clientNameById).find((row) => row.clientId === client.id) ?? null;
+    buildClientComparisonRows(portfolioRows, baseScope.clientNameById, portfolioServiceAnalysis.byClientSla).find(
+      (row) => row.clientId === client.id
+    ) ?? null;
 
   return {
     filters: {
@@ -1450,7 +1909,8 @@ export async function getClientDetailData(clientId: string, searchParams: Dashbo
     granularity: baseScope.granularity,
     visibleClients: baseScope.visibleClients,
     client,
-    overview: buildOverview(clientRows, serviceStats, sortedAgents.length),
+    overview: buildOverview(clientRows, detailServiceAnalysis.serviceStats, sortedAgents.length),
+    sla: detailServiceAnalysis.byClientSla.get(client.id) ?? null,
     trends: buildTrendSet(clientRows, baseScope.granularity),
     agents: {
       rows: sortedAgents,
