@@ -7,6 +7,7 @@ import { getVisibleClients } from "@/lib/zendesk/status";
 type JsonObject = Record<string, unknown>;
 
 export type DashboardView = "overview" | "agents" | "clients";
+export type TrendGranularity = "daily" | "weekly" | "monthly";
 export type SortDirection = "asc" | "desc";
 export type AgentSortKey =
   | "name"
@@ -28,12 +29,13 @@ export type ClientSortKey =
   | "utilisation"
   | "repliesPerTicket";
 
-type DashboardSearchParams = {
+export type DashboardSearchParams = {
   client?: string;
   agent?: string;
   start?: string;
   end?: string;
   view?: string;
+  granularity?: string;
   agentSort?: string;
   agentDir?: string;
   clientSort?: string;
@@ -69,19 +71,19 @@ type TicketMetricRow = {
   payload: JsonObject | null;
 };
 
-type DailyVolumePoint = {
+export type DailyVolumePoint = {
   date: string;
   interactions: number;
   hoursWorked: number;
 };
 
-type DailyResponsePoint = {
+export type DailyResponsePoint = {
   date: string;
   avgFirstReplyMinutes: number | null;
   avgFullResolutionMinutes: number | null;
 };
 
-type DailyChannelPoint = {
+export type DailyChannelPoint = {
   date: string;
   email: number;
   chat: number;
@@ -90,6 +92,21 @@ type DailyChannelPoint = {
 };
 
 type ServiceStats = {
+  avgFirstReplyMinutes: number | null;
+  medianFirstReplyMinutes: number | null;
+  p90FirstReplyMinutes: number | null;
+  avgFullResolutionMinutes: number | null;
+  medianFullResolutionMinutes: number | null;
+  p90FullResolutionMinutes: number | null;
+  requesterWaitTimeMinutes: number | null;
+};
+
+export type DashboardOverview = {
+  totalInteractions: number;
+  interactionsPerHourWorked: number | null;
+  agentUtilisationRatio: number | null;
+  repliesPerTicket: number | null;
+  reopensPerAgent: number | null;
   avgFirstReplyMinutes: number | null;
   medianFirstReplyMinutes: number | null;
   p90FirstReplyMinutes: number | null;
@@ -143,6 +160,87 @@ type MetricSummary = {
   ticketsWithResolution: number;
   totalRequesterWaitMinutes: number;
   ticketsWithRequesterWait: number;
+};
+
+type DashboardScope = {
+  filters: {
+    startDate: string;
+    endDate: string;
+    clientId: string;
+    agentId: string;
+  };
+  view: DashboardView;
+  granularity: TrendGranularity;
+  visibleClients: Array<{ id: string; name: string; slug: string }>;
+  clientNameById: Map<string, string>;
+  scopedClientIds: string[];
+  agentOptions: AgentOption[];
+  selectedAgent: AgentOption | null;
+  agentSort: AgentSortKey;
+  agentDir: SortDirection;
+  clientSort: ClientSortKey;
+  clientDir: SortDirection;
+};
+
+export type DashboardData = {
+  filters: DashboardScope["filters"];
+  view: DashboardView;
+  granularity: TrendGranularity;
+  visibleClients: DashboardScope["visibleClients"];
+  agentOptions: AgentOption[];
+  selectedAgent: AgentOption | null;
+  hasVisibleClients: boolean;
+  overview: DashboardOverview;
+  trends: {
+    volume: DailyVolumePoint[];
+    response: DailyResponsePoint[];
+    channel: DailyChannelPoint[];
+  };
+  leaderboard: {
+    rows: AgentLeaderboardRow[];
+    sort: { key: AgentSortKey; direction: SortDirection };
+  };
+  clients: {
+    rows: ClientComparisonRow[];
+    sort: { key: ClientSortKey; direction: SortDirection };
+    hardestClientId: string | null;
+    easiestClientId: string | null;
+  };
+};
+
+export type AgentDetailData = {
+  filters: DashboardScope["filters"];
+  granularity: TrendGranularity;
+  visibleClients: DashboardScope["visibleClients"];
+  agent: AgentOption;
+  overview: DashboardOverview;
+  trends: {
+    volume: DailyVolumePoint[];
+    response: DailyResponsePoint[];
+  };
+  peers: {
+    rows: AgentLeaderboardRow[];
+    sort: { key: AgentSortKey; direction: SortDirection };
+    rank: number | null;
+  };
+  clientContext: ClientComparisonRow | null;
+};
+
+export type ClientDetailData = {
+  filters: DashboardScope["filters"];
+  granularity: TrendGranularity;
+  visibleClients: DashboardScope["visibleClients"];
+  client: { id: string; name: string; slug: string };
+  overview: DashboardOverview;
+  trends: {
+    volume: DailyVolumePoint[];
+    response: DailyResponsePoint[];
+  };
+  agents: {
+    rows: AgentLeaderboardRow[];
+    sort: { key: AgentSortKey; direction: SortDirection };
+  };
+  portfolioContext: ClientComparisonRow | null;
 };
 
 const AGENT_SORT_KEYS: AgentSortKey[] = [
@@ -233,6 +331,10 @@ function average(values: number[]) {
 
 function parseDashboardView(value: string | undefined): DashboardView {
   return value === "agents" || value === "clients" ? value : "overview";
+}
+
+function parseTrendGranularity(value: string | undefined): TrendGranularity {
+  return value === "weekly" || value === "monthly" ? value : "daily";
 }
 
 function parseSortDirection(value: string | undefined, fallback: SortDirection): SortDirection {
@@ -332,15 +434,7 @@ async function getServiceStats(options: {
   zendeskAgentId?: string | null;
 }) {
   if (options.clientIds.length === 0) {
-    return {
-      avgFirstReplyMinutes: null,
-      medianFirstReplyMinutes: null,
-      p90FirstReplyMinutes: null,
-      avgFullResolutionMinutes: null,
-      medianFullResolutionMinutes: null,
-      p90FullResolutionMinutes: null,
-      requesterWaitTimeMinutes: null
-    } satisfies ServiceStats;
+    return emptyServiceStats();
   }
 
   const supabase = createServerSupabaseClient().schema("app");
@@ -364,15 +458,7 @@ async function getServiceStats(options: {
   });
 
   if (filteredTickets.length === 0) {
-    return {
-      avgFirstReplyMinutes: null,
-      medianFirstReplyMinutes: null,
-      p90FirstReplyMinutes: null,
-      avgFullResolutionMinutes: null,
-      medianFullResolutionMinutes: null,
-      p90FullResolutionMinutes: null,
-      requesterWaitTimeMinutes: null
-    } satisfies ServiceStats;
+    return emptyServiceStats();
   }
 
   const ticketMetricRows: TicketMetricRow[] = [];
@@ -411,6 +497,35 @@ async function getServiceStats(options: {
     p90FullResolutionMinutes: percentile(fullResolutionValues, 0.9),
     requesterWaitTimeMinutes: average(requesterWaitValues)
   } satisfies ServiceStats;
+}
+
+function emptyServiceStats(): ServiceStats {
+  return {
+    avgFirstReplyMinutes: null,
+    medianFirstReplyMinutes: null,
+    p90FirstReplyMinutes: null,
+    avgFullResolutionMinutes: null,
+    medianFullResolutionMinutes: null,
+    p90FullResolutionMinutes: null,
+    requesterWaitTimeMinutes: null
+  };
+}
+
+function emptyOverview(): DashboardOverview {
+  return {
+    totalInteractions: 0,
+    interactionsPerHourWorked: null,
+    agentUtilisationRatio: null,
+    repliesPerTicket: null,
+    reopensPerAgent: null,
+    avgFirstReplyMinutes: null,
+    medianFirstReplyMinutes: null,
+    p90FirstReplyMinutes: null,
+    avgFullResolutionMinutes: null,
+    medianFullResolutionMinutes: null,
+    p90FullResolutionMinutes: null,
+    requesterWaitTimeMinutes: null
+  };
 }
 
 function getMetricValue(rows: ComputedMetricRow[], metricKey: string) {
@@ -457,7 +572,7 @@ function buildOverview(rows: ComputedMetricRow[], serviceStats: ServiceStats, ac
       (summary.ticketsWithRequesterWait > 0
         ? summary.totalRequesterWaitMinutes / summary.ticketsWithRequesterWait
         : null)
-  };
+  } satisfies DashboardOverview;
 }
 
 function buildVolumeTrends(rows: ComputedMetricRow[]) {
@@ -971,59 +1086,84 @@ function sortClientRows(rows: ClientComparisonRow[], sortKey: ClientSortKey, dir
   });
 }
 
-export async function getDashboardData(searchParams: DashboardSearchParams = {}) {
+function getPeriodStart(date: string, granularity: TrendGranularity) {
+  if (granularity === "daily") {
+    return date;
+  }
+
+  const value = new Date(`${date}T00:00:00.000Z`);
+
+  if (granularity === "monthly") {
+    value.setUTCDate(1);
+    return formatISODate(value);
+  }
+
+  const day = value.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  value.setUTCDate(value.getUTCDate() + diff);
+  return formatISODate(value);
+}
+
+function aggregateMetricRows(rows: ComputedMetricRow[], granularity: TrendGranularity) {
+  if (granularity === "daily") {
+    return rows;
+  }
+
+  const grouped = new Map<string, ComputedMetricRow>();
+
+  for (const row of rows) {
+    const metricDate = getPeriodStart(row.metric_date, granularity);
+    const dimension = row.dimension ?? null;
+    const dimensionKey = dimension ? JSON.stringify(dimension) : "null";
+    const key = [row.client_id, metricDate, row.metric_key, dimensionKey].join("|");
+    const existing = grouped.get(key);
+
+    if (existing) {
+      existing.metric_value += row.metric_value;
+      continue;
+    }
+
+    grouped.set(key, {
+      client_id: row.client_id,
+      metric_date: metricDate,
+      metric_key: row.metric_key,
+      dimension,
+      metric_value: row.metric_value
+    });
+  }
+
+  return [...grouped.values()];
+}
+
+function buildTrendSet(rows: ComputedMetricRow[], granularity: TrendGranularity) {
+  const aggregatedRows = aggregateMetricRows(rows, granularity);
+
+  return {
+    volume: buildVolumeTrends(aggregatedRows),
+    response: buildResponseTrends(aggregatedRows)
+  };
+}
+
+async function ensureMetrics(clientIds: string[], startDate: string, endDate: string) {
+  if (clientIds.length > 0) {
+    await recomputeComputedMetricsForDateRange({
+      clientIds,
+      startDate,
+      endDate
+    });
+  }
+}
+
+async function resolveDashboardScope(searchParams: DashboardSearchParams = {}): Promise<DashboardScope> {
   const visibleClients = await getVisibleClients();
   const { startDate, endDate } = clampDateRange(searchParams.start, searchParams.end);
   const view = parseDashboardView(searchParams.view);
+  const granularity = parseTrendGranularity(searchParams.granularity);
   const agentSort = parseAgentSortKey(searchParams.agentSort);
   const agentDir = parseSortDirection(searchParams.agentDir, "desc");
   const clientSort = parseClientSortKey(searchParams.clientSort);
   const clientDir = parseSortDirection(searchParams.clientDir, "desc");
-
-  if (visibleClients.length === 0) {
-    return {
-      filters: {
-        startDate,
-        endDate,
-        clientId: "all",
-        agentId: "all"
-      },
-      view,
-      visibleClients,
-      agentOptions: [] as AgentOption[],
-      selectedAgent: null,
-      hasVisibleClients: false,
-      overview: {
-        totalInteractions: 0,
-        interactionsPerHourWorked: null,
-        agentUtilisationRatio: null,
-        repliesPerTicket: null,
-        reopensPerAgent: null,
-        avgFirstReplyMinutes: null,
-        medianFirstReplyMinutes: null,
-        p90FirstReplyMinutes: null,
-        avgFullResolutionMinutes: null,
-        medianFullResolutionMinutes: null,
-        p90FullResolutionMinutes: null,
-        requesterWaitTimeMinutes: null
-      },
-      trends: {
-        volume: [] as DailyVolumePoint[],
-        response: [] as DailyResponsePoint[],
-        channel: [] as DailyChannelPoint[]
-      },
-      leaderboard: {
-        rows: [] as AgentLeaderboardRow[],
-        sort: { key: agentSort, direction: agentDir }
-      },
-      clients: {
-        rows: [] as ClientComparisonRow[],
-        sort: { key: clientSort, direction: clientDir },
-        hardestClientId: null as string | null,
-        easiestClientId: null as string | null
-      }
-    };
-  }
+  const clientNameById = new Map(visibleClients.map((client) => [client.id, client.name]));
 
   const selectedClientId =
     searchParams.client && visibleClients.some((client) => client.id === searchParams.client)
@@ -1037,62 +1177,6 @@ export async function getDashboardData(searchParams: DashboardSearchParams = {})
       ? agentOptions.find((agent) => agent.id === searchParams.agent) ?? null
       : null;
 
-  if (scopedClientIds.length > 0) {
-    await recomputeComputedMetricsForDateRange({
-      clientIds: scopedClientIds,
-      startDate,
-      endDate
-    });
-  }
-
-  const [mainRows, agentRows, channelRows, clientRows, serviceStats] = await Promise.all([
-    getComputedMetricsRows({
-      clientIds: scopedClientIds,
-      startDate,
-      endDate,
-      scope: selectedAgent ? "agent" : "client",
-      agentId: selectedAgent?.id ?? null
-    }),
-    getComputedMetricsRows({
-      clientIds: scopedClientIds,
-      startDate,
-      endDate,
-      scope: "agent",
-      agentId: selectedAgent?.id ?? null
-    }),
-    getComputedMetricsRows({
-      clientIds: scopedClientIds,
-      startDate,
-      endDate,
-      scope: selectedAgent ? "agent_channel" : "channel",
-      agentId: selectedAgent?.id ?? null
-    }),
-    getComputedMetricsRows({
-      clientIds: scopedClientIds,
-      startDate,
-      endDate,
-      scope: selectedAgent ? "agent" : "client",
-      agentId: selectedAgent?.id ?? null
-    }),
-    getServiceStats({
-      clientIds: scopedClientIds,
-      startDate,
-      endDate,
-      zendeskAgentId: selectedAgent?.zendeskAgentId ?? null
-    })
-  ]);
-
-  const clientNameById = new Map(visibleClients.map((client) => [client.id, client.name]));
-  const leaderboardRows = sortAgentRows(
-    buildAgentLeaderboardRows(agentRows, agentOptions, clientNameById),
-    agentSort,
-    agentDir
-  );
-  const clientComparisonRows = buildClientComparisonRows(clientRows, clientNameById);
-  const sortedClientRows = sortClientRows(clientComparisonRows, clientSort, clientDir);
-  const difficultyRanking = rankClientDifficulty(clientComparisonRows);
-  const activeAgentCount = selectedAgent ? (leaderboardRows.length > 0 ? 1 : 0) : leaderboardRows.length;
-
   return {
     filters: {
       startDate,
@@ -1101,10 +1185,107 @@ export async function getDashboardData(searchParams: DashboardSearchParams = {})
       agentId: selectedAgent?.id ?? "all"
     },
     view,
+    granularity,
     visibleClients,
+    clientNameById,
+    scopedClientIds,
     agentOptions,
     selectedAgent,
-    hasVisibleClients: visibleClients.length > 0,
+    agentSort,
+    agentDir,
+    clientSort,
+    clientDir
+  };
+}
+
+export async function getDashboardData(searchParams: DashboardSearchParams = {}): Promise<DashboardData> {
+  const scope = await resolveDashboardScope(searchParams);
+
+  if (scope.visibleClients.length === 0) {
+    return {
+      filters: scope.filters,
+      view: scope.view,
+      granularity: scope.granularity,
+      visibleClients: scope.visibleClients,
+      agentOptions: [],
+      selectedAgent: null,
+      hasVisibleClients: false,
+      overview: emptyOverview(),
+      trends: {
+        volume: [],
+        response: [],
+        channel: []
+      },
+      leaderboard: {
+        rows: [],
+        sort: { key: scope.agentSort, direction: scope.agentDir }
+      },
+      clients: {
+        rows: [],
+        sort: { key: scope.clientSort, direction: scope.clientDir },
+        hardestClientId: null,
+        easiestClientId: null
+      }
+    };
+  }
+
+  await ensureMetrics(scope.scopedClientIds, scope.filters.startDate, scope.filters.endDate);
+
+  const [mainRows, agentRows, channelRows, clientRows, serviceStats] = await Promise.all([
+    getComputedMetricsRows({
+      clientIds: scope.scopedClientIds,
+      startDate: scope.filters.startDate,
+      endDate: scope.filters.endDate,
+      scope: scope.selectedAgent ? "agent" : "client",
+      agentId: scope.selectedAgent?.id ?? null
+    }),
+    getComputedMetricsRows({
+      clientIds: scope.scopedClientIds,
+      startDate: scope.filters.startDate,
+      endDate: scope.filters.endDate,
+      scope: "agent",
+      agentId: scope.selectedAgent?.id ?? null
+    }),
+    getComputedMetricsRows({
+      clientIds: scope.scopedClientIds,
+      startDate: scope.filters.startDate,
+      endDate: scope.filters.endDate,
+      scope: scope.selectedAgent ? "agent_channel" : "channel",
+      agentId: scope.selectedAgent?.id ?? null
+    }),
+    getComputedMetricsRows({
+      clientIds: scope.scopedClientIds,
+      startDate: scope.filters.startDate,
+      endDate: scope.filters.endDate,
+      scope: scope.selectedAgent ? "agent" : "client",
+      agentId: scope.selectedAgent?.id ?? null
+    }),
+    getServiceStats({
+      clientIds: scope.scopedClientIds,
+      startDate: scope.filters.startDate,
+      endDate: scope.filters.endDate,
+      zendeskAgentId: scope.selectedAgent?.zendeskAgentId ?? null
+    })
+  ]);
+
+  const leaderboardRows = sortAgentRows(
+    buildAgentLeaderboardRows(agentRows, scope.agentOptions, scope.clientNameById),
+    scope.agentSort,
+    scope.agentDir
+  );
+  const clientComparisonRows = buildClientComparisonRows(clientRows, scope.clientNameById);
+  const sortedClientRows = sortClientRows(clientComparisonRows, scope.clientSort, scope.clientDir);
+  const difficultyRanking = rankClientDifficulty(clientComparisonRows);
+  const activeAgentCount = scope.selectedAgent ? (leaderboardRows.length > 0 ? 1 : 0) : leaderboardRows.length;
+
+  return {
+    filters: scope.filters,
+    view: scope.view,
+    granularity: scope.granularity,
+    visibleClients: scope.visibleClients,
+    agentOptions: scope.agentOptions,
+    selectedAgent: scope.selectedAgent,
+    hasVisibleClients: true,
     overview: buildOverview(mainRows, serviceStats, activeAgentCount),
     trends: {
       volume: buildVolumeTrends(mainRows),
@@ -1113,12 +1294,168 @@ export async function getDashboardData(searchParams: DashboardSearchParams = {})
     },
     leaderboard: {
       rows: leaderboardRows,
-      sort: { key: agentSort, direction: agentDir }
+      sort: { key: scope.agentSort, direction: scope.agentDir }
     },
     clients: {
       rows: sortedClientRows,
-      sort: { key: clientSort, direction: clientDir },
+      sort: { key: scope.clientSort, direction: scope.clientDir },
       ...difficultyRanking
     }
   };
+}
+
+export async function getAgentDetailData(agentId: string, searchParams: DashboardSearchParams = {}) {
+  const baseScope = await resolveDashboardScope({
+    ...searchParams,
+    client: "all",
+    agent: undefined
+  });
+
+  if (baseScope.visibleClients.length === 0) {
+    return null;
+  }
+
+  const visibleAgentOptions = await getVisibleAgents(baseScope.visibleClients.map((client) => client.id));
+  const agent = visibleAgentOptions.find((option) => option.id === agentId) ?? null;
+
+  if (!agent) {
+    return null;
+  }
+
+  await ensureMetrics([agent.clientId], baseScope.filters.startDate, baseScope.filters.endDate);
+
+  const [agentRows, peerAgentRows, clientRows, serviceStats] = await Promise.all([
+    getComputedMetricsRows({
+      clientIds: [agent.clientId],
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate,
+      scope: "agent",
+      agentId
+    }),
+    getComputedMetricsRows({
+      clientIds: [agent.clientId],
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate,
+      scope: "agent"
+    }),
+    getComputedMetricsRows({
+      clientIds: [agent.clientId],
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate,
+      scope: "client"
+    }),
+    getServiceStats({
+      clientIds: [agent.clientId],
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate,
+      zendeskAgentId: agent.zendeskAgentId
+    })
+  ]);
+
+  const peerRows = sortAgentRows(
+    buildAgentLeaderboardRows(peerAgentRows, visibleAgentOptions.filter((option) => option.clientId === agent.clientId), baseScope.clientNameById),
+    baseScope.agentSort,
+    baseScope.agentDir
+  );
+  const clientContext = buildClientComparisonRows(clientRows, baseScope.clientNameById).find(
+    (row) => row.clientId === agent.clientId
+  ) ?? null;
+
+  return {
+    filters: {
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate,
+      clientId: agent.clientId,
+      agentId: agent.id
+    },
+    granularity: baseScope.granularity,
+    visibleClients: baseScope.visibleClients,
+    agent,
+    overview: buildOverview(agentRows, serviceStats, agentRows.length > 0 ? 1 : 0),
+    trends: buildTrendSet(agentRows, baseScope.granularity),
+    peers: {
+      rows: peerRows,
+      sort: { key: baseScope.agentSort, direction: baseScope.agentDir },
+      rank: peerRows.findIndex((row) => row.agentId === agent.id) + 1 || null
+    },
+    clientContext
+  } satisfies AgentDetailData;
+}
+
+export async function getClientDetailData(clientId: string, searchParams: DashboardSearchParams = {}) {
+  const baseScope = await resolveDashboardScope({
+    ...searchParams,
+    client: "all",
+    agent: undefined
+  });
+
+  if (baseScope.visibleClients.length === 0) {
+    return null;
+  }
+
+  const client = baseScope.visibleClients.find((candidate) => candidate.id === clientId) ?? null;
+
+  if (!client) {
+    return null;
+  }
+
+  await ensureMetrics(
+    baseScope.visibleClients.map((candidate) => candidate.id),
+    baseScope.filters.startDate,
+    baseScope.filters.endDate
+  );
+
+  const clientAgentOptions = await getVisibleAgents([client.id]);
+  const [clientRows, agentRows, portfolioRows, serviceStats] = await Promise.all([
+    getComputedMetricsRows({
+      clientIds: [client.id],
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate,
+      scope: "client"
+    }),
+    getComputedMetricsRows({
+      clientIds: [client.id],
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate,
+      scope: "agent"
+    }),
+    getComputedMetricsRows({
+      clientIds: baseScope.visibleClients.map((candidate) => candidate.id),
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate,
+      scope: "client"
+    }),
+    getServiceStats({
+      clientIds: [client.id],
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate
+    })
+  ]);
+
+  const sortedAgents = sortAgentRows(
+    buildAgentLeaderboardRows(agentRows, clientAgentOptions, baseScope.clientNameById),
+    baseScope.agentSort,
+    baseScope.agentDir
+  );
+  const portfolioContext =
+    buildClientComparisonRows(portfolioRows, baseScope.clientNameById).find((row) => row.clientId === client.id) ?? null;
+
+  return {
+    filters: {
+      startDate: baseScope.filters.startDate,
+      endDate: baseScope.filters.endDate,
+      clientId: client.id,
+      agentId: "all"
+    },
+    granularity: baseScope.granularity,
+    visibleClients: baseScope.visibleClients,
+    client,
+    overview: buildOverview(clientRows, serviceStats, sortedAgents.length),
+    trends: buildTrendSet(clientRows, baseScope.granularity),
+    agents: {
+      rows: sortedAgents,
+      sort: { key: baseScope.agentSort, direction: baseScope.agentDir }
+    },
+    portfolioContext
+  } satisfies ClientDetailData;
 }

@@ -1,13 +1,14 @@
 import Link from "next/link";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ExportControls } from "@/components/dashboard/export-controls";
 import {
   type AgentLeaderboardRow,
   type AgentSortKey,
   type SortDirection
 } from "@/lib/metrics/dashboard";
 
-import { buildDashboardHref } from "./dashboard-query";
+import { buildDashboardHref, buildHref } from "./dashboard-query";
 import { Sparkline } from "./sparkline";
 
 function formatNumber(value: number | null, maximumFractionDigits = 1) {
@@ -87,13 +88,19 @@ export function AgentLeaderboardTable({
   selectedAgentName: string | null;
   params: Record<string, string>;
 }) {
+  const csvHref = buildHref("/api/dashboard/export/csv", params, { report: "leaderboard" });
+  const pdfHref = buildHref("/api/dashboard/export/pdf", params, { report: "leaderboard" });
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{selectedAgentName ? `${selectedAgentName} leaderboard snapshot` : "Agent leaderboard"}</CardTitle>
-        <CardDescription>
-          Ranked agent performance for the selected window. Column headers update the server-rendered sort order.
-        </CardDescription>
+      <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-2">
+          <CardTitle>{selectedAgentName ? `${selectedAgentName} leaderboard snapshot` : "Agent leaderboard"}</CardTitle>
+          <CardDescription>
+            Ranked agent performance for the selected window. Column headers update the server-rendered sort order.
+          </CardDescription>
+        </div>
+        <ExportControls csvHref={csvHref} pdfHref={pdfHref} />
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
@@ -169,7 +176,15 @@ export function AgentLeaderboardTable({
                 {rows.map((row, index) => (
                   <tr key={row.agentId} className="rounded-2xl bg-muted/35">
                     <td className="rounded-l-2xl px-3 py-3 text-sm">
-                      <div className="font-medium text-foreground">{index + 1}. {row.agentName}</div>
+                      <a
+                        className="font-medium text-foreground underline-offset-4 hover:underline"
+                        href={buildHref(`/dashboard/agents/${row.agentId}`, params, {
+                          client: row.clientId,
+                          agent: row.agentId
+                        })}
+                      >
+                        {index + 1}. {row.agentName}
+                      </a>
                     </td>
                     <td className="px-3 py-3 text-sm text-muted-foreground">{row.clientName}</td>
                     <td className="px-3 py-3 text-right text-sm font-medium">{formatNumber(row.totalInteractions, 0)}</td>
