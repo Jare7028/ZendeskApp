@@ -41,6 +41,7 @@ export function DashboardFilters({
     client: string;
     agent: string;
     view: string;
+    granularity: string;
     agentSort: string;
     agentDir: string;
     clientSort: string;
@@ -64,6 +65,7 @@ export function DashboardFilters({
       <CardContent>
         <form className="grid gap-4 lg:grid-cols-5">
           <input name="view" type="hidden" value={queryState.view} />
+          <input name="granularity" type="hidden" value={queryState.granularity} />
           <input name="agentSort" type="hidden" value={queryState.agentSort} />
           <input name="agentDir" type="hidden" value={queryState.agentDir} />
           <input name="clientSort" type="hidden" value={queryState.clientSort} />

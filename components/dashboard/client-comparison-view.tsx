@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { CapacityBadge } from "@/components/dashboard/capacity-badge";
+import { ExportControls } from "@/components/dashboard/export-controls";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   type ClientComparisonRow,
@@ -8,7 +9,7 @@ import {
   type SortDirection
 } from "@/lib/metrics/dashboard";
 
-import { buildDashboardHref } from "./dashboard-query";
+import { buildDashboardHref, buildHref } from "./dashboard-query";
 
 function formatNumber(value: number | null, maximumFractionDigits = 1) {
   if (value === null || !Number.isFinite(value)) {
@@ -111,6 +112,8 @@ export function ClientComparisonView({
 }) {
   const hardestClient = rows.find((row) => row.clientId === hardestClientId);
   const easiestClient = rows.find((row) => row.clientId === easiestClientId);
+  const csvHref = buildHref("/api/dashboard/export/csv", params, { report: "clients" });
+  const pdfHref = buildHref("/api/dashboard/export/pdf", params, { report: "clients" });
 
   return (
     <div className="space-y-4">
@@ -128,11 +131,14 @@ export function ClientComparisonView({
       </section>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Client comparison</CardTitle>
-          <CardDescription>
-            Side-by-side throughput and service performance for the clients visible to this account.
-          </CardDescription>
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-2">
+            <CardTitle>Client comparison</CardTitle>
+            <CardDescription>
+              Side-by-side throughput and service performance for the clients visible to this account.
+            </CardDescription>
+          </div>
+          <ExportControls csvHref={csvHref} pdfHref={pdfHref} />
         </CardHeader>
         <CardContent>
           {rows.length === 0 ? (
@@ -210,7 +216,17 @@ export function ClientComparisonView({
                 <tbody>
                   {rows.map((row) => (
                     <tr key={row.clientId} className="rounded-2xl bg-muted/35">
-                      <td className="rounded-l-2xl px-3 py-3 text-sm font-medium">{row.clientName}</td>
+                      <td className="rounded-l-2xl px-3 py-3 text-sm font-medium">
+                        <a
+                          className="underline-offset-4 hover:underline"
+                          href={buildHref(`/dashboard/clients/${row.clientId}`, params, {
+                            client: row.clientId,
+                            agent: "all"
+                          })}
+                        >
+                          {row.clientName}
+                        </a>
+                      </td>
                       <td className="px-3 py-3 text-right text-sm">{formatNumber(row.totalInteractions, 0)}</td>
                       <td className="px-3 py-3 text-right text-sm">{formatNumber(row.totalHoursWorked, 1)}</td>
                       <td className="px-3 py-3 text-right text-sm">{formatNumber(row.interactionsPerHourWorked, 2)}</td>

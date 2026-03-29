@@ -2,13 +2,10 @@ import type { Route } from "next";
 
 type QueryValue = string | null | undefined;
 
-export function buildDashboardHref(
-  currentParams: Record<string, QueryValue>,
-  updates: Record<string, QueryValue>
-): Route {
+function buildQueryString(values: Record<string, QueryValue>) {
   const params = new URLSearchParams();
 
-  for (const [key, value] of Object.entries({ ...currentParams, ...updates })) {
+  for (const [key, value] of Object.entries(values)) {
     if (value && value !== "all") {
       params.set(key, value);
     } else if (value === "all" && (key === "client" || key === "agent")) {
@@ -16,6 +13,17 @@ export function buildDashboardHref(
     }
   }
 
-  const query = params.toString();
-  return (query ? `/dashboard?${query}` : "/dashboard") as Route;
+  return params.toString();
+}
+
+export function buildHref(pathname: string, currentParams: Record<string, QueryValue>, updates: Record<string, QueryValue>) {
+  const query = buildQueryString({ ...currentParams, ...updates });
+  return query ? `${pathname}?${query}` : pathname;
+}
+
+export function buildDashboardHref(
+  currentParams: Record<string, QueryValue>,
+  updates: Record<string, QueryValue>
+): Route {
+  return buildHref("/dashboard", currentParams, updates) as Route;
 }

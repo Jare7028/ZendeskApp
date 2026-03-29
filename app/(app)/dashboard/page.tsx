@@ -4,9 +4,11 @@ import { AgentLeaderboardTable } from "@/components/dashboard/agent-leaderboard-
 import { ClientComparisonView } from "@/components/dashboard/client-comparison-view";
 import { ChannelStackedCard } from "@/components/dashboard/channel-stacked-card";
 import { DashboardFilters } from "@/components/dashboard/dashboard-filters";
+import { ExportControls } from "@/components/dashboard/export-controls";
 import { LineChartCard } from "@/components/dashboard/line-chart-card";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { ServiceLevelCard } from "@/components/dashboard/service-level-card";
+import { buildHref } from "@/components/dashboard/dashboard-query";
 import { getCurrentUserContext } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/metrics/dashboard";
 
@@ -49,6 +51,7 @@ export default async function DashboardPage({
     start?: string;
     end?: string;
     view?: string;
+    granularity?: string;
     agentSort?: string;
     agentDir?: string;
     clientSort?: string;
@@ -75,6 +78,7 @@ export default async function DashboardPage({
           client: dashboard.filters.clientId,
           agent: dashboard.filters.agentId,
           view: dashboard.view,
+          granularity: dashboard.granularity,
           agentSort: dashboard.leaderboard.sort.key,
           agentDir: dashboard.leaderboard.sort.direction,
           clientSort: dashboard.clients.sort.key,
@@ -101,6 +105,7 @@ export default async function DashboardPage({
               client: dashboard.filters.clientId,
               agent: dashboard.filters.agentId,
               view: dashboard.view,
+              granularity: dashboard.granularity,
               agentSort: dashboard.leaderboard.sort.key,
               agentDir: dashboard.leaderboard.sort.direction,
               clientSort: dashboard.clients.sort.key,
@@ -120,6 +125,7 @@ export default async function DashboardPage({
               client: dashboard.filters.clientId,
               agent: dashboard.filters.agentId,
               view: dashboard.view,
+              granularity: dashboard.granularity,
               agentSort: dashboard.leaderboard.sort.key,
               agentDir: dashboard.leaderboard.sort.direction,
               clientSort: dashboard.clients.sort.key,
@@ -130,6 +136,38 @@ export default async function DashboardPage({
           />
         ) : (
           <>
+          <section className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight">Overview</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Headline portfolio metrics for the current date window.</p>
+            </div>
+            <ExportControls
+              csvHref={buildHref("/api/dashboard/export/csv", {
+                start: dashboard.filters.startDate,
+                end: dashboard.filters.endDate,
+                client: dashboard.filters.clientId,
+                agent: dashboard.filters.agentId,
+                view: dashboard.view,
+                granularity: dashboard.granularity,
+                agentSort: dashboard.leaderboard.sort.key,
+                agentDir: dashboard.leaderboard.sort.direction,
+                clientSort: dashboard.clients.sort.key,
+                clientDir: dashboard.clients.sort.direction
+              }, { report: "overview" })}
+              pdfHref={buildHref("/api/dashboard/export/pdf", {
+                start: dashboard.filters.startDate,
+                end: dashboard.filters.endDate,
+                client: dashboard.filters.clientId,
+                agent: dashboard.filters.agentId,
+                view: dashboard.view,
+                granularity: dashboard.granularity,
+                agentSort: dashboard.leaderboard.sort.key,
+                agentDir: dashboard.leaderboard.sort.direction,
+                clientSort: dashboard.clients.sort.key,
+                clientDir: dashboard.clients.sort.direction
+              }, { report: "overview" })}
+            />
+          </section>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               title="Interactions per hour worked"
