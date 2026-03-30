@@ -1,5 +1,6 @@
 import "server-only";
 
+import { deriveSyncTrust, pickEarliestTimestamp } from "@/lib/sync-status";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 type ConnectionStatusRow = {
@@ -83,7 +84,7 @@ export async function getZendeskConnectionStatus() {
           "id,zendesk_connection_id,trigger_source,sync_mode,status,counts,started_at,completed_at,error_message"
         )
         .order("started_at", { ascending: false })
-        .limit(50),
+        .limit(200),
       supabase
         .from("zendesk_backfills")
         .select("zendesk_connection_id,status,phase,progress,updated_at,completed_at,last_error")
@@ -106,9 +107,22 @@ export async function getZendeskConnectionStatus() {
   }
 
   const latestRunByConnection = new Map<string, SyncRunRow>();
+  const latestSuccessRunByConnection = new Map<string, SyncRunRow>();
+  const latestFailedRunByConnection = new Map<string, SyncRunRow>();
   for (const run of (runs ?? []) as SyncRunRow[]) {
     if (!latestRunByConnection.has(run.zendesk_connection_id)) {
       latestRunByConnection.set(run.zendesk_connection_id, run);
+    }
+
+    if (
+      (run.status === "succeeded" || run.status === "partial") &&
+      !latestSuccessRunByConnection.has(run.zendesk_connection_id)
+    ) {
+      latestSuccessRunByConnection.set(run.zendesk_connection_id, run);
+    }
+
+    if (run.status === "failed" && !latestFailedRunByConnection.has(run.zendesk_connection_id)) {
+      latestFailedRunByConnection.set(run.zendesk_connection_id, run);
     }
   }
 
@@ -119,10 +133,37 @@ export async function getZendeskConnectionStatus() {
     ((clients ?? []) as Array<{ id: string; name: string; slug: string }>).map((client) => [client.id, client])
   );
 
-  return ((connections ?? []) as ConnectionStatusRow[]).map((connection) => ({
-    ...connection,
-    client: clientById.get(connection.client_id) ?? null,
-    latestRun: latestRunByConnection.get(connection.id) ?? null,
-    backfill: backfillByConnection.get(connection.id) ?? null
-  }));
+  return ((connections ?? []) as ConnectionStatusRow[]).map((connection) => {
+    const latestRun = latestRunByConnection.get(connection.id) ?? null;
+    const latestSuccessfulRun = latestSuccessRunByConnection.get(connection.id) ?? null;
+    const latestFailedRun = latestFailedRunByConnection.get(connection.id) ?? null;
+    const freshnessAt =
+      pickEarliestTimestamp([
+        connection.tickets_synced_through,
+        connection.ticket_metrics_synced_through,
+        connection.agents_synced_through
+      ]) ?? connection.last_synced_at;
+
+    return {
+      ...connection,
+      client: clientById.get(connection.client_id) ?? null,
+      latestRun,
+      latestSuccessfulRun,
+      latestFailedRun,
+      backfill: backfillByConnection.get(connection.id) ?? null,
+      syncTrust: deriveSyncTrust({
+        system: "zendesk",
+        syncStatus: connection.sync_status,
+        lastSyncStartedAt: connection.last_sync_started_at,
+        latestRun,
+        latestSuccessAt: latestSuccessfulRun?.completed_at ?? connection.last_synced_at,
+        latestFailureAt:
+          latestFailedRun?.completed_at ??
+          (connection.last_sync_status === "failed" ? connection.last_sync_completed_at : null),
+        latestFailureMessage: latestFailedRun?.error_message ?? connection.last_sync_error,
+        freshnessAt,
+        freshnessSourceLabel: "oldest incremental watermark"
+      })
+    };
+  });
 }

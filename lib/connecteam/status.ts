@@ -1,5 +1,6 @@
 import "server-only";
 
+import { deriveSyncTrust } from "@/lib/sync-status";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 type ConnectionStatusRow = {
@@ -122,7 +123,7 @@ export async function getConnecteamConnectionStatus() {
         "connecteam_connection_id,trigger_source,sync_mode,status,counts,started_at,completed_at,error_message"
       )
       .order("started_at", { ascending: false })
-      .limit(50),
+      .limit(200),
     supabase.from("connecteam_users").select("connecteam_connection_id"),
     supabase.from("connecteam_shifts").select("connecteam_connection_id"),
     supabase.from("connecteam_daily_schedules").select("connecteam_connection_id"),
@@ -147,9 +148,22 @@ export async function getConnecteamConnectionStatus() {
   if (zendeskConnectionsError) throw zendeskConnectionsError;
 
   const latestRunByConnection = new Map<string, SyncRunRow>();
+  const latestSuccessRunByConnection = new Map<string, SyncRunRow>();
+  const latestFailedRunByConnection = new Map<string, SyncRunRow>();
   for (const run of (runs ?? []) as SyncRunRow[]) {
     if (!latestRunByConnection.has(run.connecteam_connection_id)) {
       latestRunByConnection.set(run.connecteam_connection_id, run);
+    }
+
+    if (
+      (run.status === "succeeded" || run.status === "partial") &&
+      !latestSuccessRunByConnection.has(run.connecteam_connection_id)
+    ) {
+      latestSuccessRunByConnection.set(run.connecteam_connection_id, run);
+    }
+
+    if (run.status === "failed" && !latestFailedRunByConnection.has(run.connecteam_connection_id)) {
+      latestFailedRunByConnection.set(run.connecteam_connection_id, run);
     }
   }
 
@@ -198,27 +212,48 @@ export async function getConnecteamConnectionStatus() {
     assignmentsByConnection.set(assignment.connecteam_connection_id, list);
   }
 
-  return ((connections ?? []) as ConnectionStatusRow[]).map((connection) => ({
-    ...connection,
-    client: connection.client_id ? clientById.get(connection.client_id) ?? null : null,
-    latestRun: latestRunByConnection.get(connection.id) ?? null,
-    persistedCounts: {
-      users: userCountByConnection.get(connection.id) ?? 0,
-      shifts: shiftCountByConnection.get(connection.id) ?? 0,
-      scheduledDays: scheduleCountByConnection.get(connection.id) ?? 0
-    },
-    schedulers: (schedulersByConnection.get(connection.id) ?? []).sort((left, right) =>
-      (left.scheduler_name ?? left.scheduler_id).localeCompare(right.scheduler_name ?? right.scheduler_id)
-    ),
-    schedulerAssignments: (assignmentsByConnection.get(connection.id) ?? []).map((assignment) => {
-      const zendeskConnection = zendeskConnectionById.get(assignment.zendesk_connection_id) ?? null;
-      return {
-        ...assignment,
-        client: clientById.get(assignment.client_id) ?? null,
-        zendeskConnection
-      };
-    })
-  }));
+  return ((connections ?? []) as ConnectionStatusRow[]).map((connection) => {
+    const latestRun = latestRunByConnection.get(connection.id) ?? null;
+    const latestSuccessfulRun = latestSuccessRunByConnection.get(connection.id) ?? null;
+    const latestFailedRun = latestFailedRunByConnection.get(connection.id) ?? null;
+
+    return {
+      ...connection,
+      client: connection.client_id ? clientById.get(connection.client_id) ?? null : null,
+      latestRun,
+      latestSuccessfulRun,
+      latestFailedRun,
+      syncTrust: deriveSyncTrust({
+        system: "connecteam",
+        syncStatus: connection.sync_status,
+        lastSyncStartedAt: connection.last_sync_started_at,
+        latestRun,
+        latestSuccessAt: latestSuccessfulRun?.completed_at ?? connection.last_synced_at,
+        latestFailureAt:
+          latestFailedRun?.completed_at ??
+          (connection.last_sync_status === "failed" ? connection.last_sync_completed_at : null),
+        latestFailureMessage: latestFailedRun?.error_message ?? connection.last_sync_error,
+        freshnessAt: connection.users_synced_at ?? connection.last_synced_at,
+        freshnessSourceLabel: "users synced"
+      }),
+      persistedCounts: {
+        users: userCountByConnection.get(connection.id) ?? 0,
+        shifts: shiftCountByConnection.get(connection.id) ?? 0,
+        scheduledDays: scheduleCountByConnection.get(connection.id) ?? 0
+      },
+      schedulers: (schedulersByConnection.get(connection.id) ?? []).sort((left, right) =>
+        (left.scheduler_name ?? left.scheduler_id).localeCompare(right.scheduler_name ?? right.scheduler_id)
+      ),
+      schedulerAssignments: (assignmentsByConnection.get(connection.id) ?? []).map((assignment) => {
+        const zendeskConnection = zendeskConnectionById.get(assignment.zendesk_connection_id) ?? null;
+        return {
+          ...assignment,
+          client: clientById.get(assignment.client_id) ?? null,
+          zendeskConnection
+        };
+      })
+    };
+  });
 }
 
 export async function getConnecteamAdminOverview() {

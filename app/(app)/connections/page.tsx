@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { getCurrentUserContext } from "@/lib/auth/session";
 import { readSlaConfig } from "@/lib/sla/config";
 import { getConnecteamConnectionStatus } from "@/lib/connecteam/status";
+import { getStatusToneClassName } from "@/lib/sync-status";
 import { getVisibleClients, getZendeskConnectionStatus } from "@/lib/zendesk/status";
 import {
   createClientAction,
@@ -44,6 +45,12 @@ function badgeClassName(status: string) {
   }
 
   return "bg-rose-100 text-rose-900";
+}
+
+function syncAlertClassName(hasUsableData: boolean) {
+  return hasUsableData
+    ? "border-amber-200 bg-amber-50 text-amber-900"
+    : "border-rose-200 bg-rose-50 text-rose-900";
 }
 
 function formatConnectionMessage(status: string | undefined, detail: string | undefined) {
@@ -314,6 +321,15 @@ export default async function ConnectionsPage({
                 <div className="flex flex-wrap items-center gap-2">
                   <CardTitle>{connection.name}</CardTitle>
                   <Badge className={badgeClassName(connection.status)}>{connection.status}</Badge>
+                  <Badge className={getStatusToneClassName(connection.syncTrust.health.tone)}>
+                    {connection.syncTrust.health.label}
+                  </Badge>
+                  <Badge className={getStatusToneClassName(connection.syncTrust.current.tone)}>
+                    {connection.syncTrust.current.label}
+                  </Badge>
+                  <Badge className={getStatusToneClassName(connection.syncTrust.freshness.tone)}>
+                    {connection.syncTrust.freshness.label}
+                  </Badge>
                   {connection.last_validation_status ? (
                     <Badge className={badgeClassName(connection.last_validation_status)}>
                       {connection.last_validation_status}
@@ -325,6 +341,11 @@ export default async function ConnectionsPage({
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
+                <div className="rounded-2xl border border-primary/10 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                  <p className="font-medium text-foreground">Data trust</p>
+                  <p>{connection.syncTrust.summary}</p>
+                </div>
+
                 <div className="grid gap-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
                   <div>
                     <p className="font-medium text-foreground">Credential</p>
@@ -351,9 +372,27 @@ export default async function ConnectionsPage({
 
                 <div className="grid gap-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
                   <div>
-                    <p className="font-medium text-foreground">Last sync</p>
-                    <p>{formatDateTime(connection.last_synced_at)}</p>
-                    <p className="text-xs">Scheduler shifts will be used in later sync milestones</p>
+                    <p className="font-medium text-foreground">Current sync state</p>
+                    <p>{connection.syncTrust.current.label}</p>
+                    <p className="text-xs">Started {formatDateTime(connection.last_sync_started_at)}</p>
+                    <p className="text-xs">Completed {formatDateTime(connection.last_sync_completed_at)}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Last good sync</p>
+                    <p>{formatDateTime(connection.syncTrust.latestSuccessAt)}</p>
+                    <p className="text-xs">Freshness {connection.syncTrust.freshness.label}</p>
+                    <p className="text-xs">Scheduler shifts remain the source of staffing coverage</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Latest failure</p>
+                    <p>{formatDateTime(connection.syncTrust.latestFailureAt)}</p>
+                    <p className="text-xs">
+                      {connection.syncTrust.latestFailureAt
+                        ? connection.syncTrust.failureNeedsAttention
+                          ? "Still needs attention"
+                          : "Historical only"
+                        : "No failed run recorded"}
+                    </p>
                   </div>
                   <div>
                     <p className="font-medium text-foreground">Timezone</p>
@@ -365,6 +404,12 @@ export default async function ConnectionsPage({
                 {connection.last_validation_error ? (
                   <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
                     {connection.last_validation_error}
+                  </div>
+                ) : null}
+
+                {connection.syncTrust.failureNeedsAttention && connection.syncTrust.latestFailureMessage ? (
+                  <div className={`rounded-2xl border px-4 py-3 text-sm ${syncAlertClassName(connection.syncTrust.hasUsableData)}`}>
+                    {connection.syncTrust.latestFailureMessage}
                   </div>
                 ) : null}
 
@@ -466,7 +511,15 @@ export default async function ConnectionsPage({
               <div className="flex flex-wrap items-center gap-2">
                 <CardTitle>{connection.name}</CardTitle>
                 <Badge className={badgeClassName(connection.status)}>{connection.status}</Badge>
-                <Badge className={badgeClassName(connection.sync_status)}>{connection.sync_status}</Badge>
+                <Badge className={getStatusToneClassName(connection.syncTrust.health.tone)}>
+                  {connection.syncTrust.health.label}
+                </Badge>
+                <Badge className={getStatusToneClassName(connection.syncTrust.current.tone)}>
+                  {connection.syncTrust.current.label}
+                </Badge>
+                <Badge className={getStatusToneClassName(connection.syncTrust.freshness.tone)}>
+                  {connection.syncTrust.freshness.label}
+                </Badge>
                 {connection.last_validation_status ? (
                   <Badge className={badgeClassName(connection.last_validation_status)}>
                     {connection.last_validation_status}
@@ -477,7 +530,7 @@ export default async function ConnectionsPage({
                 {connection.client?.name ?? "Unknown client"} · {connection.subdomain}.zendesk.com
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
+              <CardContent className="space-y-6">
               {(() => {
                 const sla = readSlaConfig(connection.metadata);
 
@@ -617,8 +670,8 @@ export default async function ConnectionsPage({
               <div className="grid gap-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
                 <div>
                   <p className="font-medium text-foreground">Last sync</p>
-                  <p>{formatDateTime(connection.last_synced_at)}</p>
-                  <p className="text-xs">Started {formatDateTime(connection.last_sync_started_at)}</p>
+                  <p>{formatDateTime(connection.syncTrust.latestSuccessAt)}</p>
+                  <p className="text-xs">Completed {formatDateTime(connection.last_sync_completed_at)}</p>
                 </div>
                 <div>
                   <p className="font-medium text-foreground">Latest run</p>
@@ -653,11 +706,54 @@ export default async function ConnectionsPage({
                 </div>
               </div>
 
-              {connection.last_validation_error || connection.last_sync_error || connection.latestRun?.error_message ? (
+              <div className="rounded-2xl border border-primary/10 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">Data trust</p>
+                <p>{connection.syncTrust.summary}</p>
+                <p className="text-xs">
+                  Freshness comes from the oldest incremental watermark, not just the latest run result.
+                </p>
+              </div>
+
+              <div className="grid gap-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
+                <div>
+                  <p className="font-medium text-foreground">Health</p>
+                  <p>{connection.syncTrust.health.label}</p>
+                  <p className="text-xs">Current state {connection.syncTrust.current.label}</p>
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">Freshness</p>
+                  <p>{connection.syncTrust.freshness.label}</p>
+                  <p className="text-xs">
+                    {connection.syncTrust.freshness.sourceLabel} {formatDateTime(connection.syncTrust.freshness.at)}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">Last good sync</p>
+                  <p>{formatDateTime(connection.syncTrust.latestSuccessAt)}</p>
+                  <p className="text-xs">`last_synced_at` should only move on non-failed runs</p>
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">Latest failure</p>
+                  <p>{formatDateTime(connection.syncTrust.latestFailureAt)}</p>
+                  <p className="text-xs">
+                    {connection.syncTrust.latestFailureAt
+                      ? connection.syncTrust.failureNeedsAttention
+                        ? "Newer than the last success"
+                        : "Older than the last success"
+                      : "No failed run recorded"}
+                  </p>
+                </div>
+              </div>
+
+              {connection.last_validation_error ? (
                 <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-                  {connection.last_validation_error ??
-                    connection.last_sync_error ??
-                    connection.latestRun?.error_message}
+                  {connection.last_validation_error}
+                </div>
+              ) : null}
+
+              {connection.syncTrust.failureNeedsAttention && connection.syncTrust.latestFailureMessage ? (
+                <div className={`rounded-2xl border px-4 py-3 text-sm ${syncAlertClassName(connection.syncTrust.hasUsableData)}`}>
+                  {connection.syncTrust.latestFailureMessage}
                 </div>
               ) : null}
 
