@@ -77,6 +77,16 @@ function formatConnectionMessage(status: string | undefined, detail: string | un
       return { tone: "neutral", message: `Zendesk connection disconnected${suffix}.` } satisfies FlashMessage;
     case "connecteam-connected":
       return { tone: "success", message: `Connecteam API key validated successfully${suffix}.` } satisfies FlashMessage;
+    case "connecteam-connected-sync-started":
+      return {
+        tone: "success",
+        message: `Connecteam API key validated and the initial sync was started${suffix}.`
+      } satisfies FlashMessage;
+    case "connecteam-connected-sync-failed":
+      return {
+        tone: "error",
+        message: `Connecteam API key validated but the initial sync could not be started${suffix}.`
+      } satisfies FlashMessage;
     case "connecteam-schedule-saved":
       return { tone: "success", message: `Connecteam scheduler assignment saved${suffix}.` } satisfies FlashMessage;
     case "connecteam-tested":

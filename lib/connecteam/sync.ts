@@ -1026,10 +1026,6 @@ async function runConnectionSync(
         .filter((entry): entry is [string, ConnecteamSchedulerRecord] => entry !== null)
     );
 
-    if (connection.connection_scope === "shared" && schedulerAssignments.length === 0) {
-      throw new Error("Shared Connecteam sync requires at least one Zendesk scheduler assignment.");
-    }
-
     await upsertSchedulers(supabase, connection.id, schedulers);
 
     if (schedulerAssignments.length > 0) {
@@ -1166,6 +1162,13 @@ export async function runConnecteamSyncJob(options: SyncConnectionOptions) {
   }
 
   return results;
+}
+
+export async function runConnecteamPostConnectionSync(connectionId: string) {
+  return runConnecteamSyncJob({
+    connectionId,
+    trigger: "manual"
+  });
 }
 
 export async function saveZendeskConnecteamSchedule(options: {

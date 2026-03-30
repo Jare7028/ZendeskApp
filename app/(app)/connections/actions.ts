@@ -9,7 +9,7 @@ import {
   disconnectConnecteamConnection,
   testConnecteamConnection
 } from "@/lib/connecteam/connection";
-import { saveZendeskConnecteamSchedule } from "@/lib/connecteam/sync";
+import { runConnecteamPostConnectionSync, saveZendeskConnecteamSchedule } from "@/lib/connecteam/sync";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import {
@@ -215,8 +215,22 @@ export async function createConnecteamConnectionAction(formData: FormData) {
 
   try {
     await testConnecteamConnection(connectionId);
-    revalidatePath("/connections");
-    redirect(buildConnectionsRedirect("connecteam-connected"));
+
+    try {
+      await runConnecteamPostConnectionSync(connectionId);
+      revalidatePath("/connections");
+      revalidatePath("/admin");
+      redirect(buildConnectionsRedirect("connecteam-connected-sync-started"));
+    } catch (error) {
+      revalidatePath("/connections");
+      revalidatePath("/admin");
+      redirect(
+        buildConnectionsRedirect(
+          "connecteam-connected-sync-failed",
+          error instanceof Error ? error.message : undefined
+        )
+      );
+    }
   } catch (error) {
     revalidatePath("/connections");
     redirect(
