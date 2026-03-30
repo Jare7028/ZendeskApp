@@ -39,6 +39,14 @@ export function getZendeskOauthClientSecret() {
   return required("ZENDESK_OAUTH_CLIENT_SECRET");
 }
 
+export function getOptionalZendeskOauthClientId() {
+  return process.env.ZENDESK_OAUTH_CLIENT_ID?.trim() || null;
+}
+
+export function getOptionalZendeskOauthClientSecret() {
+  return process.env.ZENDESK_OAUTH_CLIENT_SECRET?.trim() || null;
+}
+
 export function getZendeskOauthScopes() {
   return process.env.ZENDESK_OAUTH_SCOPES?.trim() || "users:read";
 }

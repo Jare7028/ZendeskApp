@@ -87,6 +87,8 @@ export async function createZendeskConnectionAction(formData: FormData) {
   const clientId = String(formData.get("clientId") ?? "").trim();
   const rawName = String(formData.get("name") ?? "").trim();
   const subdomain = normalizeZendeskSubdomain(String(formData.get("subdomain") ?? ""));
+  const oauthClientId = String(formData.get("oauthClientId") ?? "").trim() || null;
+  const oauthClientSecret = String(formData.get("oauthClientSecret") ?? "").trim() || null;
 
   if (!clientId) {
     redirect(buildConnectionsRedirect("missing-client"));
@@ -112,6 +114,10 @@ export async function createZendeskConnectionAction(formData: FormData) {
     redirect(buildConnectionsRedirect("missing-name"));
   }
 
+  if ((oauthClientId && !oauthClientSecret) || (!oauthClientId && oauthClientSecret)) {
+    redirect(buildConnectionsRedirect("oauth-client-config-invalid"));
+  }
+
   const { data: existing, error: existingError } = await supabase
     .from("zendesk_connections")
     .select("id")
@@ -128,7 +134,9 @@ export async function createZendeskConnectionAction(formData: FormData) {
     name,
     subdomain,
     created_by: context.userId,
-    credential_type: "oauth_token" as const
+    credential_type: "oauth_token" as const,
+    oauth_client_id: oauthClientId,
+    oauth_client_secret_encrypted: oauthClientSecret
   };
 
   const result = existing?.id

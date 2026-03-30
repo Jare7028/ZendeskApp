@@ -80,6 +80,11 @@ function formatConnectionMessage(status: string | undefined, detail: string | un
       return { tone: "error", message: `Zendesk authorization was denied${suffix}.` } satisfies FlashMessage;
     case "oauth-failed":
       return { tone: "error", message: `Zendesk OAuth failed${suffix}.` } satisfies FlashMessage;
+    case "oauth-client-config-invalid":
+      return {
+        tone: "error",
+        message: "Zendesk OAuth client ID and secret must both be set when using a per-connection client."
+      } satisfies FlashMessage;
     case "test-failed":
       return { tone: "error", message: `Zendesk connection test failed${suffix}.` } satisfies FlashMessage;
     case "sla-saved":
@@ -221,8 +226,9 @@ export default async function ConnectionsPage({
         <CardHeader>
           <CardTitle>Add Zendesk connection</CardTitle>
           <CardDescription>
-            Choose the client row this connection belongs to, then start OAuth against that client&apos;s Zendesk
-            subdomain.
+            Choose the client row and Zendesk subdomain. Leave OAuth client fields blank only if this app&apos;s
+            shared environment credentials are a real Zendesk global OAuth client. Otherwise, enter the customer
+            account&apos;s own OAuth client ID and secret.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -231,7 +237,7 @@ export default async function ConnectionsPage({
               No app clients exist yet. Create a client record before adding a Zendesk connection.
             </p>
           ) : (
-            <form action={createZendeskConnectionAction} className="grid gap-4 md:grid-cols-3">
+            <form action={createZendeskConnectionAction} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="clientId">Client</Label>
                 <select
@@ -258,6 +264,24 @@ export default async function ConnectionsPage({
               <div className="space-y-2">
                 <Label htmlFor="subdomain">Zendesk subdomain</Label>
                 <Input id="subdomain" name="subdomain" placeholder="acme" required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="oauthClientId">OAuth client ID</Label>
+                <Input id="oauthClientId" name="oauthClientId" placeholder="Leave blank to use shared env client" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="oauthClientSecret">OAuth client secret</Label>
+                <Input
+                  id="oauthClientSecret"
+                  name="oauthClientSecret"
+                  placeholder="Required with per-connection client ID"
+                  type="password"
+                />
+              </div>
+              <div className="md:col-span-2 xl:col-span-3 rounded-2xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+                Zendesk local OAuth clients are account-specific. For arbitrary external customer instances, either
+                use a Zendesk global OAuth client or have each customer create a confidential OAuth client in their
+                own Zendesk Admin Center and provide its ID and secret here.
               </div>
               <div className="md:col-span-3">
                 <Button type="submit">Start Zendesk OAuth</Button>
@@ -470,6 +494,21 @@ export default async function ConnectionsPage({
                   <p className="text-xs">Token type {connection.token_type ?? "n/a"}</p>
                   <p className="text-xs">Access expiry {formatDateTime(connection.token_expires_at)}</p>
                   <p className="text-xs">Refresh expiry {formatDateTime(connection.refresh_token_expires_at)}</p>
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">OAuth client source</p>
+                  <p>
+                    {String(
+                      (
+                        (
+                          connection.metadata?.oauth as
+                            | { client_source?: string | null }
+                            | undefined
+                        )?.client_source ?? "unknown"
+                      )
+                    )}
+                  </p>
+                  <p className="text-xs">Per-connection client ID overrides shared environment credentials</p>
                 </div>
                 <div>
                   <p className="font-medium text-foreground">Validation</p>

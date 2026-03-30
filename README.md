@@ -53,6 +53,8 @@ Run the app locally with `npm run dev`.
 - Agent utilisation is currently defined as scheduled hours on days with ticket activity divided by total scheduled hours, because the synced model does not yet persist a durable handle-time field suitable for active-work utilisation.
 - OAuth connection management lives on `/connections` for admins:
   - choose the app client, optional connection label, and Zendesk subdomain
+  - use shared `ZENDESK_OAUTH_CLIENT_ID` / `ZENDESK_OAUTH_CLIENT_SECRET` only if they belong to a true Zendesk global OAuth client
+  - otherwise, store a per-connection OAuth client ID and secret created inside that customer Zendesk account
   - start the Zendesk OAuth flow against `https://{subdomain}.zendesk.com`
   - callback returns to `/auth/callback/zendesk`, exchanges the code, validates `/api/v2/users/me`, and stores tokens plus expiry and validation metadata
   - admins can test, re-authorize, and disconnect existing connections

@@ -4,8 +4,8 @@ import { randomBytes } from "crypto";
 
 import {
   getBaseUrl,
-  getZendeskOauthClientId,
-  getZendeskOauthClientSecret,
+  getOptionalZendeskOauthClientId,
+  getOptionalZendeskOauthClientSecret,
   getZendeskOauthScopes
 } from "@/lib/config/env";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
@@ -31,6 +31,8 @@ export type ZendeskCredentialRow = {
   id: string;
   subdomain: string;
   credential_type: "api_token" | "oauth_token";
+  oauth_client_id?: string | null;
+  oauth_client_secret_encrypted?: string | null;
   access_token_encrypted: string | null;
   refresh_token_encrypted: string | null;
   api_user_email: string | null;
@@ -49,6 +51,12 @@ type OAuthStateRow = ZendeskCredentialRow & {
   name: string;
   oauth_state: string | null;
   oauth_state_expires_at: string | null;
+};
+
+type ResolvedOAuthClient = {
+  clientId: string;
+  clientSecret: string;
+  source: "connection" | "environment";
 };
 
 type ZendeskTokenResponse = {
@@ -125,6 +133,11 @@ function normalizeMetadata(metadata: ConnectionMetadata | null | undefined): Con
 
 function normalizeTokenType(value: string | null | undefined) {
   return value?.trim().toLowerCase() || "bearer";
+}
+
+function normalizeOptionalSecret(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
 }
 
 function tryParseJson<T>(value: string) {
@@ -229,6 +242,7 @@ async function persistZendeskTokens(
       scopes,
       token_endpoint_subdomain: connection.subdomain,
       account_subdomain: connection.subdomain,
+      client_source: resolveOAuthClient(connection).source,
       user: options?.validatedUser
         ? {
             id: options.validatedUser.id,
@@ -298,6 +312,8 @@ async function markValidationFailure(
 }
 
 async function refreshZendeskTokens(connection: ZendeskCredentialRow) {
+  const oauthClient = resolveOAuthClient(connection);
+
   if (!connection.refresh_token_encrypted) {
     throw new Error("Zendesk connection does not have a refresh token. Re-authorize this connection.");
   }
@@ -306,8 +322,8 @@ async function refreshZendeskTokens(connection: ZendeskCredentialRow) {
     const tokenResponse = await requestZendeskTokens(connection.subdomain, {
       grant_type: "refresh_token",
       refresh_token: connection.refresh_token_encrypted,
-      client_id: getZendeskOauthClientId(),
-      client_secret: getZendeskOauthClientSecret()
+      client_id: oauthClient.clientId,
+      client_secret: oauthClient.clientSecret
     });
 
     return await persistZendeskTokens(connection, tokenResponse);
@@ -359,7 +375,7 @@ export async function beginZendeskOAuth(connectionId: string) {
   const supabase = createAdminSupabaseClient();
   const { data, error } = await supabase
     .from("zendesk_connections")
-    .select("id,subdomain")
+    .select("id,subdomain,oauth_client_id,oauth_client_secret_encrypted")
     .eq("id", connectionId)
     .single();
 
@@ -370,6 +386,7 @@ export async function beginZendeskOAuth(connectionId: string) {
   const state = randomBytes(24).toString("hex");
   const expiresAt = new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString();
   const subdomain = normalizeZendeskSubdomain(String(data.subdomain ?? ""));
+  const oauthClient = resolveOAuthClient(data as Pick<ZendeskCredentialRow, "oauth_client_id" | "oauth_client_secret_encrypted">);
 
   validateZendeskSubdomain(subdomain);
 
@@ -389,7 +406,7 @@ export async function beginZendeskOAuth(connectionId: string) {
 
   const authorizeUrl = new URL(`https://${subdomain}.zendesk.com/oauth/authorizations/new`);
   authorizeUrl.searchParams.set("response_type", "code");
-  authorizeUrl.searchParams.set("client_id", getZendeskOauthClientId());
+  authorizeUrl.searchParams.set("client_id", oauthClient.clientId);
   authorizeUrl.searchParams.set("redirect_uri", getZendeskCallbackUrl());
   authorizeUrl.searchParams.set("scope", getScopes().join(" "));
   authorizeUrl.searchParams.set("expires_in", "360");
@@ -412,7 +429,7 @@ export async function completeZendeskOAuthCallback(params: {
   const { data, error } = await supabase
     .from("zendesk_connections")
     .select(
-      "id,name,subdomain,credential_type,access_token_encrypted,refresh_token_encrypted,api_user_email,token_expires_at,refresh_token_expires_at,token_type,status,external_account_id,metadata,last_validated_at,last_validation_status,last_validation_error,oauth_state,oauth_state_expires_at"
+      "id,name,subdomain,credential_type,oauth_client_id,oauth_client_secret_encrypted,access_token_encrypted,refresh_token_encrypted,api_user_email,token_expires_at,refresh_token_expires_at,token_type,status,external_account_id,metadata,last_validated_at,last_validation_status,last_validation_error,oauth_state,oauth_state_expires_at"
     )
     .eq("oauth_state", params.state)
     .maybeSingle();
@@ -456,11 +473,12 @@ export async function completeZendeskOAuthCallback(params: {
   }
 
   try {
+    const oauthClient = resolveOAuthClient(connection);
     const tokenResponse = await requestZendeskTokens(connection.subdomain, {
       grant_type: "authorization_code",
       code: params.code,
-      client_id: getZendeskOauthClientId(),
-      client_secret: getZendeskOauthClientSecret(),
+      client_id: oauthClient.clientId,
+      client_secret: oauthClient.clientSecret,
       redirect_uri: getZendeskCallbackUrl()
     });
     const validatedAt = new Date().toISOString();
@@ -488,7 +506,7 @@ export async function testZendeskConnection(connectionId: string) {
   const { data, error } = await supabase
     .from("zendesk_connections")
     .select(
-      "id,subdomain,credential_type,access_token_encrypted,refresh_token_encrypted,api_user_email,token_expires_at,refresh_token_expires_at,token_type,status,external_account_id,metadata,last_validated_at,last_validation_status,last_validation_error"
+      "id,subdomain,credential_type,oauth_client_id,oauth_client_secret_encrypted,access_token_encrypted,refresh_token_encrypted,api_user_email,token_expires_at,refresh_token_expires_at,token_type,status,external_account_id,metadata,last_validated_at,last_validation_status,last_validation_error"
     )
     .eq("id", connectionId)
     .single();
@@ -533,4 +551,38 @@ export async function disconnectZendeskConnection(connectionId: string) {
   if (error) {
     throw error;
   }
+}
+
+function resolveOAuthClient(
+  connection: Pick<ZendeskCredentialRow, "oauth_client_id" | "oauth_client_secret_encrypted">
+): ResolvedOAuthClient {
+  const connectionClientId = normalizeOptionalSecret(connection.oauth_client_id);
+  const connectionClientSecret = normalizeOptionalSecret(connection.oauth_client_secret_encrypted);
+
+  if (connectionClientId || connectionClientSecret) {
+    if (!connectionClientId || !connectionClientSecret) {
+      throw new Error("Zendesk OAuth client ID and secret must both be set for a per-connection client.");
+    }
+
+    return {
+      clientId: connectionClientId,
+      clientSecret: connectionClientSecret,
+      source: "connection"
+    };
+  }
+
+  const envClientId = getOptionalZendeskOauthClientId();
+  const envClientSecret = getOptionalZendeskOauthClientSecret();
+
+  if (!envClientId || !envClientSecret) {
+    throw new Error(
+      "Zendesk OAuth client credentials are not configured. Set a shared global client in environment variables or store a client ID and secret on this connection."
+    );
+  }
+
+  return {
+    clientId: envClientId,
+    clientSecret: envClientSecret,
+    source: "environment"
+  };
 }
