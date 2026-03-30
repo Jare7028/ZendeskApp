@@ -833,10 +833,31 @@ export async function runZendeskPostOAuthSync(connectionId: string) {
   const supabase = createAdminSupabaseClient();
   const backfill = await getBackfill(supabase, connectionId);
 
-  if (!backfill || backfill.status !== "completed") {
-    return startZendeskBackfill({
+  if (!backfill) {
+    await ensureBackfillRecord(supabase, {
+      ...(await supabase
+        .from("zendesk_connections")
+        .select(
+          "id,client_id,name,subdomain,access_token_encrypted,refresh_token_encrypted,api_user_email,credential_type,token_expires_at,refresh_token_expires_at,token_type,status,external_account_id,metadata,sync_status,sync_lock_expires_at,last_synced_at,tickets_synced_through,ticket_metrics_synced_through,agents_synced_through"
+        )
+        .eq("id", connectionId)
+        .single()).data
+    } as ConnectionRow);
+
+    return runZendeskSyncJob({
       connectionId,
-      trigger: "oauth"
+      trigger: "oauth",
+      mode: "backfill",
+      backfillPageBudget: BACKFILL_PAGE_BUDGET
+    });
+  }
+
+  if (backfill.status !== "completed") {
+    return runZendeskSyncJob({
+      connectionId,
+      trigger: "oauth",
+      mode: "backfill",
+      backfillPageBudget: BACKFILL_PAGE_BUDGET
     });
   }
 
