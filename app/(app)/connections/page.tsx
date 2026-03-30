@@ -10,6 +10,7 @@ import { readSlaConfig } from "@/lib/sla/config";
 import { getConnecteamConnectionStatus } from "@/lib/connecteam/status";
 import { getVisibleClients, getZendeskConnectionStatus } from "@/lib/zendesk/status";
 import {
+  createClientAction,
   createConnecteamConnectionAction,
   createZendeskConnectionAction,
   disconnectConnecteamConnectionAction,
@@ -128,6 +129,7 @@ export default async function ConnectionsPage({
     getVisibleClients()
   ]);
   const flash = formatConnectionMessage(searchParams?.connection, searchParams?.detail);
+  const isAdmin = context.role === "admin";
 
   return (
     <div className="space-y-6">
@@ -142,6 +144,26 @@ export default async function ConnectionsPage({
       {flash ? (
         <Card className={alertClassName(flash.tone)}>
           <CardContent className="pt-5 text-sm">{flash.message}</CardContent>
+        </Card>
+      ) : null}
+
+      {isAdmin ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Create client</CardTitle>
+            <CardDescription>
+              Add a new client record. Each client maps to one Zendesk instance and one set of Connecteam agents.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form action={createClientAction} className="flex gap-4 items-end">
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="client-name">Client name</Label>
+                <Input id="client-name" name="name" placeholder="e.g. IT Jones" required />
+              </div>
+              <Button type="submit">Create client</Button>
+            </form>
+          </CardContent>
         </Card>
       ) : null}
 

@@ -40,6 +40,33 @@ async function requireAdmin() {
   return context;
 }
 
+export async function createClientAction(formData: FormData) {
+  const context = await getCurrentUserContext();
+  if (!context || context.role !== "admin") {
+    redirect("/dashboard");
+  }
+
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) {
+    redirect("/connections?connection=missing-client-name");
+  }
+
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  const supabase = createServerSupabaseClient().schema("app");
+  const { error } = await supabase.from("clients").insert({ name, slug });
+
+  if (error) {
+    redirect(`/connections?connection=client-create-failed&detail=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/connections");
+  redirect("/connections?connection=client-created");
+}
+
 export async function createZendeskConnectionAction(formData: FormData) {
   const context = await requireAdmin();
   const supabase = createServerSupabaseClient().schema("app");
