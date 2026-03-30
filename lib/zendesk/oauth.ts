@@ -392,6 +392,7 @@ export async function beginZendeskOAuth(connectionId: string) {
   authorizeUrl.searchParams.set("client_id", getZendeskOauthClientId());
   authorizeUrl.searchParams.set("redirect_uri", getZendeskCallbackUrl());
   authorizeUrl.searchParams.set("scope", getScopes().join(" "));
+  authorizeUrl.searchParams.set("expires_in", "360");
   authorizeUrl.searchParams.set("state", state);
 
   return authorizeUrl.toString();
