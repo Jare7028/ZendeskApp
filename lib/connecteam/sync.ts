@@ -41,7 +41,17 @@ type SyncCounts = {
   mappingsUnmatched: number;
 };
 
+type SchedulerAssignmentRow = {
+  client_id: string;
+  zendesk_connection_id: string;
+  connecteam_connection_id: string;
+  scheduler_id: string;
+  scheduler_name: string | null;
+};
+
 type ShiftAssignment = {
+  clientId: string;
+  zendeskConnectionId: string | null;
   connecteamUserId: string;
   connecteamShiftId: string;
   schedulerId: string;
@@ -54,6 +64,8 @@ type ShiftAssignment = {
 };
 
 type DailyScheduleRow = {
+  clientId: string;
+  zendeskConnectionId: string | null;
   connecteamUserId: string;
   workDate: string;
   scheduledMinutes: number;
@@ -331,7 +343,7 @@ async function claimConnection(supabase: AdminSupabaseClient, connectionId: stri
     .eq("id", connectionId)
     .neq("sync_status", "running")
     .select(
-      "id,client_id,name,credential_type,external_account_id,access_token_encrypted,status,metadata,last_validated_at,last_validation_status,last_validation_error,last_synced_at,sync_status,sync_lock_expires_at,last_sync_started_at,last_sync_completed_at,last_sync_status,last_sync_error,users_synced_at,shifts_synced_through"
+      "id,client_id,connection_scope,name,credential_type,external_account_id,access_token_encrypted,status,metadata,last_validated_at,last_validation_status,last_validation_error,last_synced_at,sync_status,sync_lock_expires_at,last_sync_started_at,last_sync_completed_at,last_sync_status,last_sync_error,users_synced_at,shifts_synced_through"
     )
     .maybeSingle();
 
@@ -424,7 +436,7 @@ async function listEligibleConnections(
   let query = supabase
     .from("connecteam_connections")
     .select(
-      "id,client_id,name,credential_type,external_account_id,access_token_encrypted,status,metadata,last_validated_at,last_validation_status,last_validation_error,last_synced_at,sync_status,sync_lock_expires_at,last_sync_started_at,last_sync_completed_at,last_sync_status,last_sync_error,users_synced_at,shifts_synced_through"
+      "id,client_id,connection_scope,name,credential_type,external_account_id,access_token_encrypted,status,metadata,last_validated_at,last_validation_status,last_validation_error,last_synced_at,sync_status,sync_lock_expires_at,last_sync_started_at,last_sync_completed_at,last_sync_status,last_sync_error,users_synced_at,shifts_synced_through"
     )
     .eq("status", "active")
     .order("last_synced_at", { ascending: true, nullsFirst: true });
@@ -488,9 +500,66 @@ async function upsertUsers(
   return rows.length;
 }
 
+async function upsertSchedulers(
+  supabase: AdminSupabaseClient,
+  connectionId: string,
+  schedulers: ConnecteamSchedulerRecord[]
+) {
+  const rows = schedulers
+    .map((scheduler) => {
+      const schedulerId = readSchedulerId(scheduler);
+      if (!schedulerId) {
+        return null;
+      }
+
+      return {
+        connecteam_connection_id: connectionId,
+        scheduler_id: schedulerId,
+        scheduler_name: readSchedulerName(scheduler),
+        raw_payload: scheduler,
+        last_seen_at: isoNow()
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+
+  if (rows.length === 0) {
+    return 0;
+  }
+
+  const { error } = await supabase.from("connecteam_schedulers").upsert(rows, {
+    onConflict: "connecteam_connection_id,scheduler_id"
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return rows.length;
+}
+
+async function getSchedulerAssignments(
+  supabase: AdminSupabaseClient,
+  connectionId: string
+) {
+  const { data, error } = await supabase
+    .from("zendesk_connecteam_schedules")
+    .select("client_id,zendesk_connection_id,connecteam_connection_id,scheduler_id,scheduler_name")
+    .eq("connecteam_connection_id", connectionId);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []) as SchedulerAssignmentRow[];
+}
+
 function buildShiftAssignments(
   shifts: ConnecteamShiftRecord[],
-  scheduler: ConnecteamSchedulerRecord
+  scheduler: ConnecteamSchedulerRecord,
+  target: {
+    clientId: string;
+    zendeskConnectionId: string | null;
+  }
 ) {
   const schedulerId = readSchedulerId(scheduler);
   if (!schedulerId) {
@@ -517,6 +586,8 @@ function buildShiftAssignments(
 
     for (const connecteamUserId of userIds) {
       assignments.push({
+        clientId: target.clientId,
+        zendeskConnectionId: target.zendeskConnectionId,
         connecteamUserId,
         connecteamShiftId,
         schedulerId,
@@ -554,7 +625,8 @@ async function replaceShiftWindow(
   }
 
   const rows = assignments.map((assignment) => ({
-    client_id: connection.client_id,
+    client_id: assignment.clientId,
+    zendesk_connection_id: assignment.zendeskConnectionId,
     connecteam_connection_id: connection.id,
     connecteam_user_id: assignment.connecteamUserId,
     connecteam_shift_id: assignment.connecteamShiftId,
@@ -584,7 +656,8 @@ function aggregateDailySchedules(assignments: ShiftAssignment[], timeZone: strin
 
     for (const slice of daySlices) {
       const key = `${assignment.connecteamUserId}:${slice.workDate}`;
-      const existing = aggregates.get(key);
+      const scopedKey = `${assignment.clientId}:${assignment.zendeskConnectionId ?? "none"}:${key}`;
+      const existing = aggregates.get(scopedKey);
 
       if (existing) {
         existing.scheduledMinutes += slice.minutes;
@@ -592,7 +665,9 @@ function aggregateDailySchedules(assignments: ShiftAssignment[], timeZone: strin
         continue;
       }
 
-      aggregates.set(key, {
+      aggregates.set(scopedKey, {
+        clientId: assignment.clientId,
+        zendeskConnectionId: assignment.zendeskConnectionId,
         connecteamUserId: assignment.connecteamUserId,
         workDate: slice.workDate,
         scheduledMinutes: slice.minutes,
@@ -625,7 +700,8 @@ async function replaceDailySchedules(
   }
 
   const payload = rows.map((row) => ({
-    client_id: connection.client_id,
+    client_id: row.clientId,
+    zendesk_connection_id: row.zendeskConnectionId,
     connecteam_connection_id: connection.id,
     connecteam_user_id: row.connecteamUserId,
     work_date: row.workDate,
@@ -670,14 +746,16 @@ async function syncLegacyTimesheetData(
   }
 
   const payload = rows.map((row) => ({
-    client_id: connection.client_id,
+    client_id: row.clientId,
+    zendesk_connection_id: row.zendeskConnectionId,
     connecteam_connection_id: connection.id,
-    connecteam_timesheet_id: `schedule:${row.connecteamUserId}:${row.workDate}`,
+    connecteam_timesheet_id: `schedule:${row.clientId}:${row.zendeskConnectionId ?? "none"}:${row.connecteamUserId}:${row.workDate}`,
     work_date: row.workDate,
     minutes_worked: row.scheduledMinutes,
     billable_minutes: null,
     payload: {
       source: "scheduled_shift",
+      zendesk_connection_id: row.zendeskConnectionId,
       connecteam_user_id: row.connecteamUserId,
       work_date: row.workDate,
       scheduled_minutes: row.scheduledMinutes,
@@ -694,12 +772,19 @@ async function syncLegacyTimesheetData(
 
 async function getZendeskAgents(
   supabase: AdminSupabaseClient,
-  clientId: string
+  clientId: string,
+  zendeskConnectionId?: string | null
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from("zendesk_agents")
     .select("client_id,zendesk_connection_id,zendesk_user_id,name,email")
     .eq("client_id", clientId);
+
+  if (zendeskConnectionId) {
+    query = query.eq("zendesk_connection_id", zendeskConnectionId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw error;
@@ -736,15 +821,23 @@ async function getConnecteamUsers(
 
 async function getExistingMappings(
   supabase: AdminSupabaseClient,
-  connection: SyncConnectionRow
+  clientId: string,
+  connectionId: string,
+  zendeskConnectionId?: string | null
 ) {
-  const { data, error } = await supabase
+  let query = supabase
     .from("agent_mappings")
     .select(
       "id,client_id,zendesk_connection_id,connecteam_connection_id,zendesk_agent_id,connecteam_user_id,display_name,email,zendesk_agent_name,connecteam_user_name,match_source,manual_override"
     )
-    .eq("client_id", connection.client_id)
-    .eq("connecteam_connection_id", connection.id);
+    .eq("client_id", clientId)
+    .eq("connecteam_connection_id", connectionId);
+
+  if (zendeskConnectionId) {
+    query = query.eq("zendesk_connection_id", zendeskConnectionId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw error;
@@ -768,13 +861,10 @@ async function getExistingMappings(
 
 async function autoMatchAgents(
   supabase: AdminSupabaseClient,
-  connection: SyncConnectionRow
+  connection: SyncConnectionRow,
+  targets: Array<{ clientId: string; zendeskConnectionId: string | null }>
 ) {
-  const [zendeskAgents, connecteamUsers, existingMappings] = await Promise.all([
-    getZendeskAgents(supabase, connection.client_id),
-    getConnecteamUsers(supabase, connection.id),
-    getExistingMappings(supabase, connection)
-  ]);
+  const connecteamUsers = await getConnecteamUsers(supabase, connection.id);
 
   const connecteamUserByEmail = new Map<string, (typeof connecteamUsers)[number]>();
   for (const user of connecteamUsers) {
@@ -784,92 +874,99 @@ async function autoMatchAgents(
     }
   }
 
-  const manualByZendeskKey = new Map<string, (typeof existingMappings)[number]>();
-  for (const mapping of existingMappings) {
-    if (mapping.manual_override && mapping.zendesk_connection_id && mapping.zendesk_agent_id) {
-      manualByZendeskKey.set(
-        `${mapping.zendesk_connection_id}:${mapping.zendesk_agent_id}`,
-        mapping
-      );
-    }
-  }
-
-  const manualUserIds = new Set(
-    existingMappings
-      .filter((mapping) => mapping.manual_override && mapping.connecteam_user_id)
-      .map((mapping) => mapping.connecteam_user_id as string)
-  );
-  const claimedUserIds = new Set(manualUserIds);
-  const rowsToUpsert: Array<Record<string, Json | string | boolean | null>> = [];
   let autoCount = 0;
   let unmatchedCount = 0;
 
-  for (const agent of zendeskAgents) {
-    const mappingKey = `${agent.zendesk_connection_id}:${agent.zendesk_user_id}`;
-    if (manualByZendeskKey.has(mappingKey)) {
+  for (const target of targets) {
+    const [zendeskAgents, existingMappings] = await Promise.all([
+      getZendeskAgents(supabase, target.clientId, target.zendeskConnectionId),
+      getExistingMappings(supabase, target.clientId, connection.id, target.zendeskConnectionId)
+    ]);
+
+    const manualByZendeskKey = new Map<string, (typeof existingMappings)[number]>();
+    for (const mapping of existingMappings) {
+      if (mapping.manual_override && mapping.zendesk_connection_id && mapping.zendesk_agent_id) {
+        manualByZendeskKey.set(`${mapping.zendesk_connection_id}:${mapping.zendesk_agent_id}`, mapping);
+      }
+    }
+
+    const manualUserIds = new Set(
+      existingMappings
+        .filter((mapping) => mapping.manual_override && mapping.connecteam_user_id)
+        .map((mapping) => mapping.connecteam_user_id as string)
+    );
+    const claimedUserIds = new Set(manualUserIds);
+    const rowsToUpsert: Array<Record<string, Json | string | boolean | null>> = [];
+
+    for (const agent of zendeskAgents) {
+      const mappingKey = `${agent.zendesk_connection_id}:${agent.zendesk_user_id}`;
+      if (manualByZendeskKey.has(mappingKey)) {
+        continue;
+      }
+
+      const email = normalizeEmail(agent.email);
+      const matchedUser = email ? connecteamUserByEmail.get(email) ?? null : null;
+      const connecteamUserId =
+        matchedUser && !claimedUserIds.has(matchedUser.connecteam_user_id)
+          ? matchedUser.connecteam_user_id
+          : null;
+      const connecteamUserName = connecteamUserId ? matchedUser?.full_name ?? null : null;
+
+      if (connecteamUserId) {
+        claimedUserIds.add(connecteamUserId);
+        autoCount += 1;
+      } else {
+        unmatchedCount += 1;
+      }
+
+      rowsToUpsert.push({
+        client_id: target.clientId,
+        zendesk_connection_id: agent.zendesk_connection_id,
+        connecteam_connection_id: connection.id,
+        zendesk_agent_id: agent.zendesk_user_id,
+        connecteam_user_id: connecteamUserId,
+        display_name: agent.name ?? connecteamUserName ?? email ?? "Unmapped agent",
+        email,
+        zendesk_agent_name: agent.name,
+        connecteam_user_name: connecteamUserName,
+        match_source: connecteamUserId ? "auto" : "unmatched",
+        manual_override: false,
+        matched_at: isoNow()
+      });
+    }
+
+    if (rowsToUpsert.length === 0) {
       continue;
     }
 
-    const email = normalizeEmail(agent.email);
-    const matchedUser = email ? connecteamUserByEmail.get(email) ?? null : null;
-    const connecteamUserId =
-      matchedUser && !claimedUserIds.has(matchedUser.connecteam_user_id)
-        ? matchedUser.connecteam_user_id
-        : null;
-    const connecteamUserName = connecteamUserId ? matchedUser?.full_name ?? null : null;
+    let clearQuery = supabase
+      .from("agent_mappings")
+      .update({
+        connecteam_user_id: null,
+        connecteam_user_name: null,
+        match_source: "unmatched",
+        matched_at: isoNow()
+      })
+      .eq("client_id", target.clientId)
+      .eq("connecteam_connection_id", connection.id)
+      .eq("manual_override", false);
 
-    if (connecteamUserId) {
-      claimedUserIds.add(connecteamUserId);
-      autoCount += 1;
-    } else {
-      unmatchedCount += 1;
+    if (target.zendeskConnectionId) {
+      clearQuery = clearQuery.eq("zendesk_connection_id", target.zendeskConnectionId);
     }
 
-    rowsToUpsert.push({
-      client_id: connection.client_id,
-      zendesk_connection_id: agent.zendesk_connection_id,
-      connecteam_connection_id: connection.id,
-      zendesk_agent_id: agent.zendesk_user_id,
-      connecteam_user_id: connecteamUserId,
-      display_name: agent.name ?? connecteamUserName ?? email ?? "Unmapped agent",
-      email,
-      zendesk_agent_name: agent.name,
-      connecteam_user_name: connecteamUserName,
-      match_source: connecteamUserId ? "auto" : "unmatched",
-      manual_override: false,
-      matched_at: isoNow()
+    const { error: clearError } = await clearQuery;
+    if (clearError) {
+      throw clearError;
+    }
+
+    const { error } = await supabase.from("agent_mappings").upsert(rowsToUpsert, {
+      onConflict: "client_id,zendesk_connection_id,zendesk_agent_id"
     });
-  }
 
-  if (rowsToUpsert.length === 0) {
-    return {
-      autoCount: 0,
-      unmatchedCount: 0
-    };
-  }
-
-  const { error: clearError } = await supabase
-    .from("agent_mappings")
-    .update({
-      connecteam_user_id: null,
-      connecteam_user_name: null,
-      match_source: "unmatched",
-      matched_at: isoNow()
-    })
-    .eq("client_id", connection.client_id)
-    .eq("connecteam_connection_id", connection.id)
-    .eq("manual_override", false);
-
-  if (clearError) {
-    throw clearError;
-  }
-
-  const { error } = await supabase.from("agent_mappings").upsert(rowsToUpsert, {
-    onConflict: "client_id,zendesk_connection_id,zendesk_agent_id"
-  });
-
-  if (error) {
-    throw error;
+    if (error) {
+      throw error;
+    }
   }
 
   return {
@@ -916,21 +1013,61 @@ async function runConnectionSync(
     const client = getConnecteamClient(connection.access_token_encrypted);
     const users = await client.listAllUsers();
     const schedulers = await client.listAllSchedulers();
+    const schedulerAssignments = await getSchedulerAssignments(supabase, connection.id);
     const shiftWindowStart = getShiftWindowStart(connection);
     const shiftWindowEnd = getShiftWindowEnd();
     const assignments: ShiftAssignment[] = [];
+    const schedulerById = new Map(
+      schedulers
+        .map((scheduler) => {
+          const schedulerId = readSchedulerId(scheduler);
+          return schedulerId ? [schedulerId, scheduler] : null;
+        })
+        .filter((entry): entry is [string, ConnecteamSchedulerRecord] => entry !== null)
+    );
 
-    for (const scheduler of schedulers) {
-      const schedulerId = readSchedulerId(scheduler);
-      if (!schedulerId) {
-        continue;
+    if (connection.connection_scope === "shared" && schedulerAssignments.length === 0) {
+      throw new Error("Shared Connecteam sync requires at least one Zendesk scheduler assignment.");
+    }
+
+    await upsertSchedulers(supabase, connection.id, schedulers);
+
+    if (schedulerAssignments.length > 0) {
+      for (const target of schedulerAssignments) {
+        const scheduler = schedulerById.get(target.scheduler_id);
+        if (!scheduler) {
+          continue;
+        }
+
+        const shifts = await client.listAllSchedulerShifts(target.scheduler_id, {
+          startDate: shiftWindowStart,
+          endDate: shiftWindowEnd
+        });
+        assignments.push(
+          ...buildShiftAssignments(shifts, scheduler, {
+            clientId: target.client_id,
+            zendeskConnectionId: target.zendesk_connection_id
+          })
+        );
       }
+    } else if (connection.client_id) {
+      for (const scheduler of schedulers) {
+        const schedulerId = readSchedulerId(scheduler);
+        if (!schedulerId) {
+          continue;
+        }
 
-      const shifts = await client.listAllSchedulerShifts(schedulerId, {
-        startDate: shiftWindowStart,
-        endDate: shiftWindowEnd
-      });
-      assignments.push(...buildShiftAssignments(shifts, scheduler));
+        const shifts = await client.listAllSchedulerShifts(schedulerId, {
+          startDate: shiftWindowStart,
+          endDate: shiftWindowEnd
+        });
+        assignments.push(
+          ...buildShiftAssignments(shifts, scheduler, {
+            clientId: connection.client_id,
+            zendeskConnectionId: null
+          })
+        );
+      }
     }
 
     const usersCount = await upsertUsers(supabase, connection, users);
@@ -938,7 +1075,18 @@ async function runConnectionSync(
     const dailySchedules = aggregateDailySchedules(assignments, readConnectionTimezone(connection));
     const scheduledDaysCount = await replaceDailySchedules(supabase, connection, dailySchedules, shiftWindowStart);
     await syncLegacyTimesheetData(supabase, connection, dailySchedules, shiftWindowStart);
-    const mappingResult = await autoMatchAgents(supabase, connection);
+    const mappingResult = await autoMatchAgents(
+      supabase,
+      connection,
+      schedulerAssignments.length > 0
+        ? schedulerAssignments.map((assignment) => ({
+            clientId: assignment.client_id,
+            zendeskConnectionId: assignment.zendesk_connection_id
+          }))
+        : connection.client_id
+          ? [{ clientId: connection.client_id, zendeskConnectionId: null }]
+          : []
+    );
 
     const maxShiftEndAt = maxIso(assignments.map((assignment) => assignment.endAt));
     const counts: SyncCounts = {
@@ -959,7 +1107,13 @@ async function runConnectionSync(
       {
         shift_window_start: shiftWindowStart,
         shift_window_end: shiftWindowEnd,
-        timezone: readConnectionTimezone(connection)
+        timezone: readConnectionTimezone(connection),
+        selected_schedulers: schedulerAssignments.map((assignment) => ({
+          client_id: assignment.client_id,
+          zendesk_connection_id: assignment.zendesk_connection_id,
+          scheduler_id: assignment.scheduler_id,
+          scheduler_name: assignment.scheduler_name
+        }))
       },
       {
         users_synced_at: isoNow(),
@@ -1014,6 +1168,59 @@ export async function runConnecteamSyncJob(options: SyncConnectionOptions) {
   return results;
 }
 
+export async function saveZendeskConnecteamSchedule(options: {
+  clientId: string;
+  zendeskConnectionId: string;
+  connecteamConnectionId: string;
+  schedulerId: string | null;
+}) {
+  const supabase = createAdminSupabaseClient();
+  const { clientId, zendeskConnectionId, connecteamConnectionId, schedulerId } = options;
+
+  if (!schedulerId) {
+    const { error } = await supabase
+      .from("zendesk_connecteam_schedules")
+      .delete()
+      .eq("zendesk_connection_id", zendeskConnectionId)
+      .eq("connecteam_connection_id", connecteamConnectionId);
+
+    if (error) {
+      throw error;
+    }
+
+    return;
+  }
+
+  const { data: scheduler, error: schedulerError } = await supabase
+    .from("connecteam_schedulers")
+    .select("scheduler_id,scheduler_name,raw_payload")
+    .eq("connecteam_connection_id", connecteamConnectionId)
+    .eq("scheduler_id", schedulerId)
+    .single();
+
+  if (schedulerError) {
+    throw schedulerError;
+  }
+
+  const { error } = await supabase.from("zendesk_connecteam_schedules").upsert(
+    {
+      client_id: clientId,
+      zendesk_connection_id: zendeskConnectionId,
+      connecteam_connection_id: connecteamConnectionId,
+      scheduler_id: scheduler.scheduler_id,
+      scheduler_name: scheduler.scheduler_name,
+      raw_payload: scheduler.raw_payload
+    },
+    {
+      onConflict: "zendesk_connection_id"
+    }
+  );
+
+  if (error) {
+    throw error;
+  }
+}
+
 export async function saveAgentMappingOverride(options: {
   clientId: string;
   zendeskConnectionId: string;
@@ -1037,7 +1244,6 @@ export async function saveAgentMappingOverride(options: {
         ? supabase
             .from("connecteam_users")
             .select("full_name,email")
-            .eq("client_id", clientId)
             .eq("connecteam_connection_id", connecteamConnectionId)
             .eq("connecteam_user_id", connecteamUserId)
             .single()

@@ -16,8 +16,9 @@ type ConnectionMetadata = {
 
 export type ConnecteamConnectionRow = {
   id: string;
-  client_id: string;
+  client_id: string | null;
   name: string;
+  connection_scope: "client" | "shared";
   credential_type: "api_key";
   external_account_id: string | null;
   access_token_encrypted: string | null;
@@ -130,7 +131,7 @@ export async function testConnecteamConnection(connectionId: string) {
   const { data, error } = await supabase
     .from("connecteam_connections")
     .select(
-      "id,client_id,name,credential_type,external_account_id,access_token_encrypted,status,metadata,last_validated_at,last_validation_status,last_validation_error,last_synced_at"
+      "id,client_id,name,connection_scope,credential_type,external_account_id,access_token_encrypted,status,metadata,last_validated_at,last_validation_status,last_validation_error,last_synced_at"
     )
     .eq("id", connectionId)
     .single();

@@ -16,6 +16,7 @@ import {
   disconnectConnecteamConnectionAction,
   disconnectZendeskConnectionAction,
   reauthZendeskConnectionAction,
+  saveZendeskConnecteamScheduleAction,
   saveZendeskSlaConfigAction,
   testConnecteamConnectionAction,
   testZendeskConnectionAction
@@ -76,6 +77,8 @@ function formatConnectionMessage(status: string | undefined, detail: string | un
       return { tone: "neutral", message: `Zendesk connection disconnected${suffix}.` } satisfies FlashMessage;
     case "connecteam-connected":
       return { tone: "success", message: `Connecteam API key validated successfully${suffix}.` } satisfies FlashMessage;
+    case "connecteam-schedule-saved":
+      return { tone: "success", message: `Connecteam scheduler assignment saved${suffix}.` } satisfies FlashMessage;
     case "connecteam-tested":
       return { tone: "success", message: `Connecteam connection test passed${suffix}.` } satisfies FlashMessage;
     case "connecteam-disconnected":
@@ -86,6 +89,8 @@ function formatConnectionMessage(status: string | undefined, detail: string | un
       return { tone: "error", message: `Connecteam connection could not be saved${suffix}.` } satisfies FlashMessage;
     case "connecteam-test-failed":
       return { tone: "error", message: `Connecteam validation failed${suffix}.` } satisfies FlashMessage;
+    case "connecteam-schedule-save-failed":
+      return { tone: "error", message: `Connecteam scheduler assignment failed${suffix}.` } satisfies FlashMessage;
     case "oauth-denied":
       return { tone: "error", message: `Zendesk authorization was denied${suffix}.` } satisfies FlashMessage;
     case "oauth-failed":
@@ -151,8 +156,8 @@ export default async function ConnectionsPage({
       <div className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Connections</h1>
         <p className="text-sm text-muted-foreground">
-          Create, validate, re-authorize, and disconnect Zendesk and Connecteam connections for each client tenant,
-          then store per-client SLA targets on the active Zendesk connection.
+          Create, validate, re-authorize, and disconnect Zendesk plus a shared Connecteam account, then assign one
+          Connecteam scheduler to each Zendesk connection and store per-client SLA targets.
         </p>
       </div>
 
@@ -186,49 +191,24 @@ export default async function ConnectionsPage({
         <CardHeader>
           <CardTitle>Add Connecteam connection</CardTitle>
           <CardDescription>
-            Choose the client row, name the connection, and store a server-only Connecteam API key. Validation calls
-            Connecteam&apos;s <code>/me</code> endpoint.
+            Store one shared Connecteam API key for the workspace. After validation and sync, assign a scheduler to
+            each Zendesk connection below.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {clients.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No app clients exist yet. Create a client record before adding a Connecteam connection.
-            </p>
-          ) : (
-            <form action={createConnecteamConnectionAction} className="grid gap-4 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="connecteamClientId">Client</Label>
-                <select
-                  className="flex h-11 w-full rounded-2xl border border-input bg-background px-4 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-                  defaultValue=""
-                  id="connecteamClientId"
-                  name="clientId"
-                  required
-                >
-                  <option disabled value="">
-                    Select a client
-                  </option>
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          <form action={createConnecteamConnectionAction} className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="connecteamName">Connection label</Label>
-                <Input id="connecteamName" name="name" placeholder="Acme Workforce" />
+                <Input id="connecteamName" name="name" placeholder="Shared Connecteam account" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="apiKey">API key</Label>
                 <Input id="apiKey" name="apiKey" placeholder="Paste Connecteam API key" required type="password" />
               </div>
-              <div className="md:col-span-3">
+              <div className="md:col-span-2">
                 <Button type="submit">Save and validate Connecteam</Button>
               </div>
             </form>
-          )}
         </CardContent>
       </Card>
 
@@ -330,7 +310,9 @@ export default async function ConnectionsPage({
                     </Badge>
                   ) : null}
                 </div>
-                <CardDescription>{connection.client?.name ?? "Unknown client"} · Connecteam</CardDescription>
+                <CardDescription>
+                  {connection.connection_scope === "shared" ? "Shared workspace account" : connection.client?.name ?? "Unknown client"} · Connecteam
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
                 <div className="grid gap-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
@@ -352,8 +334,8 @@ export default async function ConnectionsPage({
                   </div>
                   <div>
                     <p className="font-medium text-foreground">Client</p>
-                    <p>{connection.client?.name ?? "Unknown client"}</p>
-                    <p className="text-xs">Slug {connection.client?.slug ?? "n/a"}</p>
+                    <p>{connection.connection_scope === "shared" ? "Shared across Zendesk clients" : connection.client?.name ?? "Unknown client"}</p>
+                    <p className="text-xs">Scope {connection.connection_scope}</p>
                   </div>
                 </div>
 
@@ -387,6 +369,70 @@ export default async function ConnectionsPage({
                       Disconnect
                     </Button>
                   </form>
+                </div>
+
+                <div className="space-y-4 rounded-[24px] border border-border bg-muted/20 p-5">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-semibold text-foreground">Zendesk scheduler assignments</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Each Zendesk connection selects one Connecteam scheduler from this shared account.
+                    </p>
+                  </div>
+
+                  {zendeskConnections.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Create a Zendesk connection before assigning schedulers.</p>
+                  ) : null}
+
+                  <div className="space-y-3">
+                    {zendeskConnections.map((zendeskConnection) => {
+                      const assignment = connection.schedulerAssignments.find(
+                        (row) => row.zendesk_connection_id === zendeskConnection.id
+                      );
+
+                      return (
+                        <form
+                          action={saveZendeskConnecteamScheduleAction}
+                          className="grid gap-3 rounded-2xl border border-border bg-background px-4 py-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto]"
+                          key={`${connection.id}:${zendeskConnection.id}`}
+                        >
+                          <input type="hidden" name="clientId" value={zendeskConnection.client_id} />
+                          <input type="hidden" name="zendeskConnectionId" value={zendeskConnection.id} />
+                          <input type="hidden" name="connecteamConnectionId" value={connection.id} />
+
+                          <div className="space-y-1 text-sm">
+                            <p className="font-medium text-foreground">{zendeskConnection.name}</p>
+                            <p className="text-muted-foreground">
+                              {zendeskConnection.client?.name ?? "Unknown client"} · {zendeskConnection.subdomain}.zendesk.com
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <select
+                              className="flex h-11 w-full rounded-2xl border border-input bg-background px-4 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                              defaultValue={assignment?.scheduler_id ?? ""}
+                              name="schedulerId"
+                            >
+                              <option value="">No scheduler selected</option>
+                              {connection.schedulers.map((scheduler) => (
+                                <option key={scheduler.scheduler_id} value={scheduler.scheduler_id}>
+                                  {scheduler.scheduler_name ?? scheduler.scheduler_id}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            <Badge className={badgeClassName(assignment ? "active" : "pending")}>
+                              {assignment?.scheduler_name ?? "unassigned"}
+                            </Badge>
+                            <Button type="submit" variant="outline">
+                              Save schedule
+                            </Button>
+                          </div>
+                        </form>
+                      );
+                    })}
+                  </div>
                 </div>
               </CardContent>
             </Card>

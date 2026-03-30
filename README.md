@@ -64,10 +64,11 @@ Run the app locally with `npm run dev`.
 ## Connecteam connections
 
 - Admin connection management also lives on `/connections` for Connecteam:
-  - choose the app client, optional connection label, and paste a Connecteam API key
+  - create one shared workspace Connecteam connection, optionally name it, and paste a Connecteam API key
   - the API key is stored server-side in `app.connecteam_connections.access_token_encrypted`, matching the existing explicit secret-storage pattern already used for connection credentials in this app
   - save/test calls Connecteam `GET /me`, persists durable validation status fields on `app.connecteam_connections`, and stores basic account metadata in `metadata`
   - admins can re-test and disconnect existing Connecteam connections without exposing the API key to the browser
+  - each Zendesk connection then selects exactly one Connecteam scheduler from the discovered scheduler catalog in `app.zendesk_connecteam_schedules`
 - Server-only Connecteam helpers live in `lib/connecteam/*` and provide:
   - `GET /me`
   - `GET /users/v1/users`
@@ -81,18 +82,19 @@ Run the app locally with `npm run dev`.
 - Admin-triggered Connecteam sync lives on `/admin` and a cron endpoint now exists at `/api/cron/connecteam-sync`.
 - The sync engine:
   - loads all Connecteam users for the connection
-  - loads all schedulers, then fetches scheduler shifts
+  - loads all schedulers into `app.connecteam_schedulers`, then fetches shifts only for the schedulers assigned to Zendesk connections
   - persists raw user rows in `app.connecteam_users`
-  - persists per-user shift assignments in `app.connecteam_shifts`
+  - persists per-user shift assignments in `app.connecteam_shifts`, scoped by client and optional Zendesk connection
   - derives per-user scheduled minutes per local work day in `app.connecteam_daily_schedules`
   - mirrors the daily scheduled result into `app.timesheet_data` with `payload.source = 'scheduled_shift'` so later metrics can query scheduled hours without calling Connecteam again
 - Incremental sync is driven by durable connection state on `app.connecteam_connections`, including sync status, run timestamps, `users_synced_at`, and `shifts_synced_through`.
 - Durable run history is stored in `app.connecteam_sync_runs`.
 - Agent identity matching also lives on `/admin`:
-  - Zendesk agents are matched to Connecteam users by normalized email within the same client and Connecteam connection
+  - Zendesk agents are matched to Connecteam users by normalized email within the same client and shared Connecteam connection
   - auto-matches are stored in `app.agent_mappings`
   - manual overrides are stored in the same table with `match_source = 'manual'` and `manual_override = true`
   - later auto-syncs do not overwrite manual overrides
+- Zendesk agent names are now seeded directly from Zendesk sync into `app.agent_mappings`, so dashboard agent labels no longer depend on a Connecteam sync having refreshed the mapping rows.
 - Scheduled hours are derived strictly from Scheduler shift `startDate`/`endDate`. Time Clock or punch data is not used anywhere in this milestone.
 
 ## Auth flow
@@ -118,6 +120,8 @@ Core tables:
 - `app.viewer_client_assignments`
 - `app.zendesk_connections`
 - `app.connecteam_connections`
+- `app.connecteam_schedulers`
+- `app.zendesk_connecteam_schedules`
 - `app.agent_mappings`
 - `app.connecteam_users`
 - `app.connecteam_sync_runs`

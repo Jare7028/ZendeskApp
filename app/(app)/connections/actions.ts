@@ -9,6 +9,7 @@ import {
   disconnectConnecteamConnection,
   testConnecteamConnection
 } from "@/lib/connecteam/connection";
+import { saveZendeskConnecteamSchedule } from "@/lib/connecteam/sync";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import {
@@ -160,29 +161,14 @@ export async function createZendeskConnectionAction(formData: FormData) {
 export async function createConnecteamConnectionAction(formData: FormData) {
   const context = await requireAdmin();
   const supabase = createServerSupabaseClient().schema("app");
-  const clientId = String(formData.get("clientId") ?? "").trim();
   const rawName = String(formData.get("name") ?? "").trim();
   const apiKey = String(formData.get("apiKey") ?? "").trim();
-
-  if (!clientId) {
-    redirect(buildConnectionsRedirect("missing-client"));
-  }
 
   if (!apiKey) {
     redirect(buildConnectionsRedirect("connecteam-missing-api-key"));
   }
 
-  const { data: client, error: clientError } = await supabase
-    .from("clients")
-    .select("id,name")
-    .eq("id", clientId)
-    .single();
-
-  if (clientError || !client) {
-    redirect(buildConnectionsRedirect("invalid-client"));
-  }
-
-  const name = rawName || String(client.name ?? "").trim();
+  const name = rawName || "Shared Connecteam account";
 
   if (!name) {
     redirect(buildConnectionsRedirect("missing-name"));
@@ -191,8 +177,7 @@ export async function createConnecteamConnectionAction(formData: FormData) {
   const { data: existing, error: existingError } = await supabase
     .from("connecteam_connections")
     .select("id")
-    .eq("client_id", clientId)
-    .eq("name", name)
+    .eq("connection_scope", "shared")
     .maybeSingle();
 
   if (existingError) {
@@ -200,8 +185,9 @@ export async function createConnecteamConnectionAction(formData: FormData) {
   }
 
   const payload = {
-    client_id: clientId,
+    client_id: null,
     name,
+    connection_scope: "shared" as const,
     credential_type: "api_key" as const,
     access_token_encrypted: apiKey,
     created_by: context.userId,
@@ -236,6 +222,39 @@ export async function createConnecteamConnectionAction(formData: FormData) {
     redirect(
       buildConnectionsRedirect(
         "connecteam-test-failed",
+        error instanceof Error ? error.message : undefined
+      )
+    );
+  }
+}
+
+export async function saveZendeskConnecteamScheduleAction(formData: FormData) {
+  await requireAdmin();
+
+  const clientId = String(formData.get("clientId") ?? "").trim();
+  const zendeskConnectionId = String(formData.get("zendeskConnectionId") ?? "").trim();
+  const connecteamConnectionId = String(formData.get("connecteamConnectionId") ?? "").trim();
+  const schedulerIdRaw = String(formData.get("schedulerId") ?? "").trim();
+
+  if (!clientId || !zendeskConnectionId || !connecteamConnectionId) {
+    redirect(buildConnectionsRedirect("connecteam-schedule-save-failed", "Missing schedule assignment fields."));
+  }
+
+  try {
+    await saveZendeskConnecteamSchedule({
+      clientId,
+      zendeskConnectionId,
+      connecteamConnectionId,
+      schedulerId: schedulerIdRaw || null
+    });
+    revalidatePath("/connections");
+    revalidatePath("/admin");
+    redirect(buildConnectionsRedirect("connecteam-schedule-saved"));
+  } catch (error) {
+    revalidatePath("/connections");
+    redirect(
+      buildConnectionsRedirect(
+        "connecteam-schedule-save-failed",
         error instanceof Error ? error.message : undefined
       )
     );

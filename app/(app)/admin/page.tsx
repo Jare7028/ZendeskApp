@@ -94,8 +94,8 @@ export default async function AdminPage({
       <div className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Admin controls</h1>
         <p className="text-sm text-muted-foreground">
-          Zendesk sync state and Connecteam scheduled-shift sync now share durable run history, watermarks, and
-          admin review controls.
+          Zendesk sync state and the shared Connecteam scheduled-shift sync now share durable run history,
+          scheduler assignments, watermarks, and admin review controls.
         </p>
       </div>
 
@@ -263,7 +263,9 @@ export default async function AdminPage({
                     </Badge>
                   ) : null}
                 </div>
-                <CardDescription>{connection.client?.name ?? "Unknown client"} · Connecteam scheduler shifts</CardDescription>
+                <CardDescription>
+                  {connection.connection_scope === "shared" ? "Shared workspace account" : connection.client?.name ?? "Unknown client"} · Connecteam scheduler shifts
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid gap-4 text-sm text-muted-foreground md:grid-cols-2 xl:grid-cols-4">
@@ -315,6 +317,11 @@ export default async function AdminPage({
                     <p className="text-xs">Manual {connection.mappingSummary.manual}</p>
                     <p className="text-xs">Unmatched {connection.mappingSummary.unmatched}</p>
                   </div>
+                  <div>
+                    <p className="font-medium text-foreground">Scheduler assignments</p>
+                    <p>{connection.schedulerAssignments.length}</p>
+                    <p className="text-xs">{connection.schedulers.length} schedulers discovered</p>
+                  </div>
                 </div>
 
                 {connection.last_sync_error || connection.latestRun?.error_message ? (
@@ -340,63 +347,82 @@ export default async function AdminPage({
                     </p>
                   </div>
 
-                  {connection.zendeskAgents.length === 0 ? (
+                  {connection.assignmentRows.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-                      No Zendesk agents have been synced for this client yet.
+                      No scheduler assignments exist for this Connecteam connection yet.
                     </div>
                   ) : null}
 
                   <div className="space-y-3">
-                    {connection.zendeskAgents.map((agent) => (
-                      <form
-                        action={saveAgentMappingOverrideAction}
-                        className="grid gap-3 rounded-2xl border border-border px-4 py-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.2fr)_220px_auto]"
-                        key={`${connection.id}:${agent.zendeskConnectionId}:${agent.zendeskAgentId}`}
-                      >
-                        <input type="hidden" name="clientId" value={connection.client_id} />
-                        <input type="hidden" name="zendeskConnectionId" value={agent.zendeskConnectionId} />
-                        <input type="hidden" name="connecteamConnectionId" value={connection.id} />
-                        <input type="hidden" name="zendeskAgentId" value={agent.zendeskAgentId} />
-
-                        <div className="space-y-1 text-sm">
-                          <p className="font-medium text-foreground">{agent.zendeskName ?? agent.email ?? agent.zendeskAgentId}</p>
-                          <p className="text-muted-foreground">{agent.email ?? "No email on Zendesk agent"}</p>
-                        </div>
-
-                        <div className="space-y-1 text-sm">
-                          <p className="font-medium text-foreground">
-                            {agent.mapping?.connecteam_user_name ?? "No Connecteam user selected"}
+                    {connection.assignmentRows.map((assignment) => (
+                      <div className="space-y-3 rounded-[24px] border border-border px-4 py-4" key={assignment.id}>
+                        <div className="space-y-1">
+                          <p className="text-base font-semibold text-foreground">
+                            {assignment.client?.name ?? "Unknown client"} · {assignment.zendeskConnection?.name ?? "Unknown Zendesk connection"}
                           </p>
-                          <p className="text-muted-foreground">
-                            {agent.mapping?.connecteam_user_id ?? "No current Connecteam mapping"}
+                          <p className="text-sm text-muted-foreground">
+                            Scheduler {assignment.scheduler_name ?? assignment.scheduler_id}
                           </p>
                         </div>
 
-                        <div className="space-y-2">
-                          <select
-                            className="flex h-11 w-full rounded-2xl border border-input bg-background px-4 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-                            defaultValue={agent.mapping?.connecteam_user_id ?? ""}
-                            name="connecteamUserId"
+                        {assignment.zendeskAgents.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+                            No Zendesk agents have been synced for this assignment yet.
+                          </div>
+                        ) : null}
+
+                        {assignment.zendeskAgents.map((agent) => (
+                          <form
+                            action={saveAgentMappingOverrideAction}
+                            className="grid gap-3 rounded-2xl border border-border px-4 py-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.2fr)_220px_auto]"
+                            key={`${connection.id}:${agent.zendeskConnectionId}:${agent.zendeskAgentId}`}
                           >
-                            <option value="">No match / clear</option>
-                            {connection.users.map((user) => (
-                              <option key={user.connecteam_user_id} value={user.connecteam_user_id}>
-                                {user.full_name ?? user.email ?? user.connecteam_user_id}
-                                {user.email ? ` (${user.email})` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                            <input type="hidden" name="clientId" value={assignment.client_id} />
+                            <input type="hidden" name="zendeskConnectionId" value={agent.zendeskConnectionId} />
+                            <input type="hidden" name="connecteamConnectionId" value={connection.id} />
+                            <input type="hidden" name="zendeskAgentId" value={agent.zendeskAgentId} />
 
-                        <div className="flex items-center gap-3">
-                          <Badge className={badgeClassName(agent.mapping?.match_source ?? "unmatched")}>
-                            {agent.mapping?.match_source ?? "unmatched"}
-                          </Badge>
-                          <Button type="submit" variant="outline">
-                            Save override
-                          </Button>
-                        </div>
-                      </form>
+                            <div className="space-y-1 text-sm">
+                              <p className="font-medium text-foreground">{agent.zendeskName ?? agent.email ?? agent.zendeskAgentId}</p>
+                              <p className="text-muted-foreground">{agent.email ?? "No email on Zendesk agent"}</p>
+                            </div>
+
+                            <div className="space-y-1 text-sm">
+                              <p className="font-medium text-foreground">
+                                {agent.mapping?.connecteam_user_name ?? "No Connecteam user selected"}
+                              </p>
+                              <p className="text-muted-foreground">
+                                {agent.mapping?.connecteam_user_id ?? "No current Connecteam mapping"}
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <select
+                                className="flex h-11 w-full rounded-2xl border border-input bg-background px-4 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                                defaultValue={agent.mapping?.connecteam_user_id ?? ""}
+                                name="connecteamUserId"
+                              >
+                                <option value="">No match / clear</option>
+                                {assignment.users.map((user) => (
+                                  <option key={user.connecteam_user_id} value={user.connecteam_user_id}>
+                                    {user.full_name ?? user.email ?? user.connecteam_user_id}
+                                    {user.email ? ` (${user.email})` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <Badge className={badgeClassName(agent.mapping?.match_source ?? "unmatched")}>
+                                {agent.mapping?.match_source ?? "unmatched"}
+                              </Badge>
+                              <Button type="submit" variant="outline">
+                                Save override
+                              </Button>
+                            </div>
+                          </form>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 </div>

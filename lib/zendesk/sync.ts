@@ -109,6 +109,11 @@ function numericMinutes(value?: { calendar?: number | null } | null) {
   return typeof value?.calendar === "number" ? value.calendar : null;
 }
 
+function normalizeEmail(value: string | null | undefined) {
+  const trimmed = value?.trim().toLowerCase();
+  return trimmed ? trimmed : null;
+}
+
 async function getBackfill(
   supabase: AdminSupabaseClient,
   connectionId: string
@@ -423,6 +428,24 @@ async function upsertAgents(
 
   if (error) {
     throw error;
+  }
+
+  const { error: mappingError } = await supabase.from("agent_mappings").upsert(
+    agents.map((agent) => ({
+      client_id: connection.client_id,
+      zendesk_connection_id: connection.id,
+      zendesk_agent_id: String(agent.id),
+      display_name: agent.name?.trim() || normalizeEmail(agent.email) || "Unknown agent",
+      email: normalizeEmail(agent.email),
+      zendesk_agent_name: agent.name?.trim() || null
+    })),
+    {
+      onConflict: "client_id,zendesk_connection_id,zendesk_agent_id"
+    }
+  );
+
+  if (mappingError) {
+    throw mappingError;
   }
 
   return {
