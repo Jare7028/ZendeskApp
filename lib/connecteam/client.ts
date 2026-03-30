@@ -34,8 +34,15 @@ export type ConnecteamShiftRecord = {
   id?: string | number | null;
   shiftId?: string | number | null;
   userId?: string | number | null;
+  assignedUserId?: string | number | null;
+  employeeId?: string | number | null;
+  assignedUserIds?: Array<string | number> | null;
+  userIds?: Array<string | number> | null;
+  startTime?: string | number | null;
+  endTime?: string | number | null;
   startDate?: string | null;
   endDate?: string | null;
+  timezone?: string | null;
   [key: string]: unknown;
 };
 
@@ -107,7 +114,12 @@ function readArray<T>(payload: unknown, keys: string[]): T[] {
 function parsePageEnvelope<T>(payload: unknown, keys: string[], requestedLimit: number, requestedOffset: number) {
   const record = asRecord(payload);
   const items = readArray<T>(payload, keys);
-  const pagination = asRecord(record?.pagination) ?? asRecord(record?.meta) ?? asRecord(asRecord(record?.data)?.pagination);
+  const pagination =
+    asRecord(record?.pagination) ??
+    asRecord(record?.paging) ??
+    asRecord(record?.meta) ??
+    asRecord(asRecord(record?.data)?.pagination) ??
+    asRecord(asRecord(record?.data)?.paging);
   const total = toNumber(
     pagination?.total ?? record?.total ?? asRecord(record?.data)?.total ?? (Array.isArray(payload) ? items.length : null)
   );
@@ -164,6 +176,24 @@ async function readJsonOrThrow<T>(response: Response): Promise<T> {
   return body as T;
 }
 
+function readErrorMessage(payload: unknown, status: number) {
+  const record = asRecord(payload);
+  const nestedData = asRecord(record?.data);
+
+  const parts = [
+    typeof nestedData?.message === "string" ? nestedData.message : null,
+    typeof record?.message === "string" ? record.message : null,
+    typeof record?.error === "string" ? record.error : null,
+    typeof nestedData?.error === "string" ? nestedData.error : null
+  ].filter((value): value is string => Boolean(value?.trim()));
+
+  if (parts.length > 0) {
+    return parts.join(" ");
+  }
+
+  return `Connecteam request failed with status ${status}.`;
+}
+
 function unwrapObject(payload: unknown) {
   const record = asRecord(payload);
   if (!record) {
@@ -203,15 +233,15 @@ export class ConnecteamClient {
 
   async listSchedulerShifts(
     schedulerId: string | number,
-    options?: { limit?: number; offset?: number; startDate?: string; endDate?: string }
+    options?: { limit?: number; offset?: number; startTime?: number; endTime?: number }
   ) {
     const limit = options?.limit ?? DEFAULT_PAGE_SIZE;
     const offset = options?.offset ?? 0;
     const response = await this.request(`/scheduler/v1/schedulers/${encodeURIComponent(String(schedulerId))}/shifts`, {
       limit,
       offset,
-      ...(options?.startDate ? { startDate: options.startDate } : {}),
-      ...(options?.endDate ? { endDate: options.endDate } : {})
+      ...(typeof options?.startTime === "number" ? { startTime: options.startTime } : {}),
+      ...(typeof options?.endTime === "number" ? { endTime: options.endTime } : {})
     });
     const payload = await readJsonOrThrow<unknown>(response);
     return parsePageEnvelope<ConnecteamShiftRecord>(payload, ["shifts", "items", "results"], limit, offset);
@@ -230,15 +260,15 @@ export class ConnecteamClient {
 
   async listAllSchedulerShifts(
     schedulerId: string | number,
-    options?: { pageSize?: number; startDate?: string; endDate?: string }
+    options?: { pageSize?: number; startTime?: number; endTime?: number }
   ) {
     return this.collectPages<ConnecteamShiftRecord>(
       (offset, limit) =>
         this.listSchedulerShifts(schedulerId, {
           offset,
           limit,
-          startDate: options?.startDate,
-          endDate: options?.endDate
+          startTime: options?.startTime,
+          endTime: options?.endTime
         }),
       options?.pageSize
     );
@@ -296,6 +326,17 @@ export class ConnecteamClient {
 
     if (!response.ok) {
       const text = await response.text();
+      if (text) {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          throw new Error(text);
+        }
+
+        throw new Error(readErrorMessage(payload, response.status));
+      }
+
       throw new Error(text || `Connecteam request failed with status ${response.status}.`);
     }
 

@@ -131,6 +131,30 @@ function normalizeId(value: unknown) {
   return normalizeString(value);
 }
 
+function normalizeTimestamp(value: unknown) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric)) {
+      value = numeric;
+    } else {
+      const timestamp = Date.parse(trimmed);
+      return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+    }
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const milliseconds = value > 1_000_000_000_000 ? value : value * 1000;
+    return new Date(milliseconds).toISOString();
+  }
+
+  return null;
+}
+
 function asRecord(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -177,11 +201,11 @@ function readShiftId(shift: ConnecteamShiftRecord) {
 }
 
 function readShiftStart(shift: ConnecteamShiftRecord) {
-  return normalizeString(shift.startDate);
+  return normalizeTimestamp(shift.startDate ?? shift.startTime);
 }
 
 function readShiftEnd(shift: ConnecteamShiftRecord) {
-  return normalizeString(shift.endDate);
+  return normalizeTimestamp(shift.endDate ?? shift.endTime);
 }
 
 function readShiftUserIds(shift: ConnecteamShiftRecord) {
@@ -319,6 +343,45 @@ function splitShiftByLocalDay(startAt: string, endAt: string, timeZone: string) 
   }
 
   return slices;
+}
+
+function getShiftWindowBounds(connection: SyncConnectionRow) {
+  const startDate = getShiftWindowStart(connection);
+  const endDate = getShiftWindowEnd();
+  return {
+    startDate,
+    endDate,
+    startTime: Math.floor(Date.parse(`${startDate}T00:00:00.000Z`) / 1000),
+    endTime: Math.floor(Date.parse(`${endDate}T23:59:59.000Z`) / 1000)
+  };
+}
+
+function readErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    const parts = [
+      typeof record.message === "string" ? record.message : null,
+      typeof record.details === "string" ? record.details : null,
+      typeof record.hint === "string" ? record.hint : null,
+      typeof record.code === "string" ? `code=${record.code}` : null
+    ].filter((value): value is string => Boolean(value?.trim()));
+
+    if (parts.length > 0) {
+      return parts.join(" | ");
+    }
+
+    try {
+      return JSON.stringify(record);
+    } catch {
+      return "Unknown Connecteam sync failure.";
+    }
+  }
+
+  return "Unknown Connecteam sync failure.";
 }
 
 async function claimConnection(supabase: AdminSupabaseClient, connectionId: string) {
@@ -865,6 +928,16 @@ async function autoMatchAgents(
   targets: Array<{ clientId: string; zendeskConnectionId: string | null }>
 ) {
   const connecteamUsers = await getConnecteamUsers(supabase, connection.id);
+  const uniqueTargets = targets.filter(
+    (target, index) =>
+      targets.findIndex(
+        (candidate) =>
+          candidate.clientId === target.clientId && candidate.zendeskConnectionId === target.zendeskConnectionId
+      ) === index
+  );
+  const existingMappings = await Promise.all(
+    uniqueTargets.map((target) => getExistingMappings(supabase, target.clientId, connection.id, target.zendeskConnectionId))
+  ).then((rows) => rows.flat());
 
   const connecteamUserByEmail = new Map<string, (typeof connecteamUsers)[number]>();
   for (const user of connecteamUsers) {
@@ -876,26 +949,20 @@ async function autoMatchAgents(
 
   let autoCount = 0;
   let unmatchedCount = 0;
+  const manualByZendeskKey = new Map<string, (typeof existingMappings)[number]>();
+  const claimedUserIds = new Set<string>();
 
-  for (const target of targets) {
-    const [zendeskAgents, existingMappings] = await Promise.all([
-      getZendeskAgents(supabase, target.clientId, target.zendeskConnectionId),
-      getExistingMappings(supabase, target.clientId, connection.id, target.zendeskConnectionId)
-    ]);
-
-    const manualByZendeskKey = new Map<string, (typeof existingMappings)[number]>();
-    for (const mapping of existingMappings) {
-      if (mapping.manual_override && mapping.zendesk_connection_id && mapping.zendesk_agent_id) {
-        manualByZendeskKey.set(`${mapping.zendesk_connection_id}:${mapping.zendesk_agent_id}`, mapping);
+  for (const mapping of existingMappings) {
+    if (mapping.manual_override && mapping.zendesk_connection_id && mapping.zendesk_agent_id) {
+      manualByZendeskKey.set(`${mapping.zendesk_connection_id}:${mapping.zendesk_agent_id}`, mapping);
+      if (mapping.connecteam_user_id) {
+        claimedUserIds.add(mapping.connecteam_user_id);
       }
     }
+  }
 
-    const manualUserIds = new Set(
-      existingMappings
-        .filter((mapping) => mapping.manual_override && mapping.connecteam_user_id)
-        .map((mapping) => mapping.connecteam_user_id as string)
-    );
-    const claimedUserIds = new Set(manualUserIds);
+  for (const target of uniqueTargets) {
+    const zendeskAgents = await getZendeskAgents(supabase, target.clientId, target.zendeskConnectionId);
     const rowsToUpsert: Array<Record<string, Json | string | boolean | null>> = [];
 
     for (const agent of zendeskAgents) {
@@ -1014,8 +1081,7 @@ async function runConnectionSync(
     const users = await client.listAllUsers();
     const schedulers = await client.listAllSchedulers();
     const schedulerAssignments = await getSchedulerAssignments(supabase, connection.id);
-    const shiftWindowStart = getShiftWindowStart(connection);
-    const shiftWindowEnd = getShiftWindowEnd();
+    const shiftWindow = getShiftWindowBounds(connection);
     const assignments: ShiftAssignment[] = [];
     const schedulerById = new Map(
       schedulers
@@ -1036,8 +1102,8 @@ async function runConnectionSync(
         }
 
         const shifts = await client.listAllSchedulerShifts(target.scheduler_id, {
-          startDate: shiftWindowStart,
-          endDate: shiftWindowEnd
+          startTime: shiftWindow.startTime,
+          endTime: shiftWindow.endTime
         });
         assignments.push(
           ...buildShiftAssignments(shifts, scheduler, {
@@ -1054,8 +1120,8 @@ async function runConnectionSync(
         }
 
         const shifts = await client.listAllSchedulerShifts(schedulerId, {
-          startDate: shiftWindowStart,
-          endDate: shiftWindowEnd
+          startTime: shiftWindow.startTime,
+          endTime: shiftWindow.endTime
         });
         assignments.push(
           ...buildShiftAssignments(shifts, scheduler, {
@@ -1067,10 +1133,10 @@ async function runConnectionSync(
     }
 
     const usersCount = await upsertUsers(supabase, connection, users);
-    const shiftsCount = await replaceShiftWindow(supabase, connection, assignments, shiftWindowStart);
+    const shiftsCount = await replaceShiftWindow(supabase, connection, assignments, shiftWindow.startDate);
     const dailySchedules = aggregateDailySchedules(assignments, readConnectionTimezone(connection));
-    const scheduledDaysCount = await replaceDailySchedules(supabase, connection, dailySchedules, shiftWindowStart);
-    await syncLegacyTimesheetData(supabase, connection, dailySchedules, shiftWindowStart);
+    const scheduledDaysCount = await replaceDailySchedules(supabase, connection, dailySchedules, shiftWindow.startDate);
+    await syncLegacyTimesheetData(supabase, connection, dailySchedules, shiftWindow.startDate);
     const mappingResult = await autoMatchAgents(
       supabase,
       connection,
@@ -1101,8 +1167,8 @@ async function runConnectionSync(
       mappingResult.unmatchedCount > 0 ? "partial" : "succeeded",
       counts,
       {
-        shift_window_start: shiftWindowStart,
-        shift_window_end: shiftWindowEnd,
+        shift_window_start: shiftWindow.startDate,
+        shift_window_end: shiftWindow.endDate,
         timezone: readConnectionTimezone(connection),
         selected_schedulers: schedulerAssignments.map((assignment) => ({
           client_id: assignment.client_id,
@@ -1122,7 +1188,7 @@ async function runConnectionSync(
       counts
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown Connecteam sync failure.";
+    const message = readErrorMessage(error);
 
     await finalizeRun(
       supabase,
