@@ -344,7 +344,7 @@ function shouldRefreshOAuthToken(connection: ZendeskCredentialRow, forceRefresh 
   }
 
   if (!connection.token_expires_at) {
-    return true;
+    return false;
   }
 
   return new Date(connection.token_expires_at).getTime() <= Date.now() + TOKEN_REFRESH_SKEW_MS;
