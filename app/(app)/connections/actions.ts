@@ -215,22 +215,6 @@ export async function createConnecteamConnectionAction(formData: FormData) {
 
   try {
     await testConnecteamConnection(connectionId);
-
-    try {
-      await runConnecteamPostConnectionSync(connectionId);
-      revalidatePath("/connections");
-      revalidatePath("/admin");
-      redirect(buildConnectionsRedirect("connecteam-connected-sync-started"));
-    } catch (error) {
-      revalidatePath("/connections");
-      revalidatePath("/admin");
-      redirect(
-        buildConnectionsRedirect(
-          "connecteam-connected-sync-failed",
-          error instanceof Error ? error.message : undefined
-        )
-      );
-    }
   } catch (error) {
     revalidatePath("/connections");
     redirect(
@@ -240,6 +224,22 @@ export async function createConnecteamConnectionAction(formData: FormData) {
       )
     );
   }
+
+  let syncStarted = false;
+  try {
+    await runConnecteamPostConnectionSync(connectionId);
+    syncStarted = true;
+  } catch {
+    // sync failed but validation succeeded
+  }
+
+  revalidatePath("/connections");
+  revalidatePath("/admin");
+  redirect(
+    buildConnectionsRedirect(
+      syncStarted ? "connecteam-connected-sync-started" : "connecteam-connected-sync-failed"
+    )
+  );
 }
 
 export async function saveZendeskConnecteamScheduleAction(formData: FormData) {
