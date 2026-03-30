@@ -71,16 +71,21 @@ export default async function ClientDetailPage({
         />
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard
-          title="Total interactions"
+          title="Total tickets"
           value={formatNumber(detail.overview.totalInteractions, 0)}
           description="Client ticket volume captured inside the current date range."
         />
         <MetricCard
-          title="Interactions per hour worked"
+          title="Reply contacts per hour"
+          value={formatNumber(detail.overview.repliesPerHourWorked, 2)}
+          description="Reply count divided by team hours worked."
+        />
+        <MetricCard
+          title="Tickets per hour worked"
           value={formatNumber(detail.overview.interactionsPerHourWorked, 2)}
-          description="Throughput built from interactions divided by hours worked."
+          description="Ticket count divided by team hours worked."
         />
         <MetricCard
           title="Utilisation"

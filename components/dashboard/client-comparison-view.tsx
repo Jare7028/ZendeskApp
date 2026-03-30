@@ -143,7 +143,7 @@ export function ClientComparisonView({
           <div className="space-y-2">
             <CardTitle>Client comparison</CardTitle>
             <CardDescription>
-              Side-by-side throughput and service performance for the clients visible to this account.
+              Side-by-side ticket load, service performance, and staffing context for the clients visible to this account.
             </CardDescription>
           </div>
           <ExportControls csvHref={csvHref} pdfHref={pdfHref} />
@@ -163,7 +163,7 @@ export function ClientComparisonView({
                       <SortLink
                         activeKey={sort.key}
                         direction={sort.direction}
-                        label="Interactions"
+                        label="Tickets"
                         params={params}
                         sortKey="totalInteractions"
                       />
@@ -175,7 +175,7 @@ export function ClientComparisonView({
                       <SortLink
                         activeKey={sort.key}
                         direction={sort.direction}
-                        label="Int/hr"
+                        label="Tkt/hr"
                         params={params}
                         sortKey="interactionsPerHourWorked"
                       />

@@ -138,8 +138,9 @@ export async function GET(request: NextRequest) {
       "utilisation"
     ];
     const rows: Array<Record<string, string | number | null | undefined>> = [
-      { rowType: "summary", label: "totalInteractions", value: detail.overview.totalInteractions, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
-      { rowType: "summary", label: "interactionsPerHourWorked", value: detail.overview.interactionsPerHourWorked, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
+      { rowType: "summary", label: "totalTickets", value: detail.overview.totalInteractions, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
+      { rowType: "summary", label: "repliesPerHourWorked", value: detail.overview.repliesPerHourWorked, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
+      { rowType: "summary", label: "ticketsPerHourWorked", value: detail.overview.interactionsPerHourWorked, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
       { rowType: "summary", label: "avgFirstReplyMinutes", value: detail.overview.avgFirstReplyMinutes, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
       { rowType: "summary", label: "avgFullResolutionMinutes", value: detail.overview.avgFullResolutionMinutes, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
       { rowType: "summary", label: "utilisation", value: detail.overview.agentUtilisationRatio, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName }
@@ -231,8 +232,9 @@ export async function GET(request: NextRequest) {
       "utilisation"
     ];
     const rows: Array<Record<string, string | number | null | undefined>> = [
-      { rowType: "summary", label: "totalInteractions", value: detail.overview.totalInteractions, clientId: detail.client.id, clientName: detail.client.name },
-      { rowType: "summary", label: "interactionsPerHourWorked", value: detail.overview.interactionsPerHourWorked, clientId: detail.client.id, clientName: detail.client.name },
+      { rowType: "summary", label: "totalTickets", value: detail.overview.totalInteractions, clientId: detail.client.id, clientName: detail.client.name },
+      { rowType: "summary", label: "repliesPerHourWorked", value: detail.overview.repliesPerHourWorked, clientId: detail.client.id, clientName: detail.client.name },
+      { rowType: "summary", label: "ticketsPerHourWorked", value: detail.overview.interactionsPerHourWorked, clientId: detail.client.id, clientName: detail.client.name },
       { rowType: "summary", label: "avgFirstReplyMinutes", value: detail.overview.avgFirstReplyMinutes, clientId: detail.client.id, clientName: detail.client.name },
       { rowType: "summary", label: "avgFullResolutionMinutes", value: detail.overview.avgFullResolutionMinutes, clientId: detail.client.id, clientName: detail.client.name },
       { rowType: "summary", label: "utilisation", value: detail.overview.agentUtilisationRatio, clientId: detail.client.id, clientName: detail.client.name }
@@ -291,8 +293,10 @@ export async function GET(request: NextRequest) {
   const dashboard = await getDashboardData(searchParams);
   const columns = ["section", "label", "value", "date", "interactions", "hoursWorked", "avgFirstReplyMinutes", "avgFullResolutionMinutes"];
   const rows: Array<Record<string, string | number | null | undefined>> = [
-    { section: "overview", label: "totalInteractions", value: dashboard.overview.totalInteractions },
-    { section: "overview", label: "interactionsPerHourWorked", value: dashboard.overview.interactionsPerHourWorked },
+    { section: "overview", label: "totalTickets", value: dashboard.overview.totalInteractions },
+    { section: "overview", label: "totalReplies", value: dashboard.overview.totalReplies },
+    { section: "overview", label: "repliesPerHourWorked", value: dashboard.overview.repliesPerHourWorked },
+    { section: "overview", label: "ticketsPerHourWorked", value: dashboard.overview.interactionsPerHourWorked },
     { section: "overview", label: "avgFirstReplyMinutes", value: dashboard.overview.avgFirstReplyMinutes },
     { section: "overview", label: "avgFullResolutionMinutes", value: dashboard.overview.avgFullResolutionMinutes },
     { section: "overview", label: "requesterWaitTimeMinutes", value: dashboard.overview.requesterWaitTimeMinutes }

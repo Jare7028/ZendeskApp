@@ -5,12 +5,15 @@ import { ClientComparisonView } from "@/components/dashboard/client-comparison-v
 import { ChannelStackedCard } from "@/components/dashboard/channel-stacked-card";
 import { DashboardFilters } from "@/components/dashboard/dashboard-filters";
 import { ExportControls } from "@/components/dashboard/export-controls";
+import { GranularityToggle } from "@/components/dashboard/granularity-toggle";
 import { LineChartCard } from "@/components/dashboard/line-chart-card";
 import { MetricCard } from "@/components/dashboard/metric-card";
+import { OverviewSectionSwitcher, type OverviewSection } from "@/components/dashboard/overview-section-switcher";
 import { SlaAlertFeed } from "@/components/dashboard/sla-alert-feed";
 import { SlaComplianceCard } from "@/components/dashboard/sla-compliance-card";
 import { ServiceLevelCard } from "@/components/dashboard/service-level-card";
 import { buildHref } from "@/components/dashboard/dashboard-query";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUserContext } from "@/lib/auth/session";
 import { getDashboardData } from "@/lib/metrics/dashboard";
 
@@ -44,6 +47,10 @@ function formatMinutes(value: number | null) {
   return `${value.toFixed(1)}m`;
 }
 
+function parseOverviewSection(value: string | undefined): OverviewSection {
+  return value === "service" || value === "workforce" ? value : "operations";
+}
+
 export default async function DashboardPage({
   searchParams
 }: {
@@ -53,6 +60,7 @@ export default async function DashboardPage({
     start?: string;
     end?: string;
     view?: string;
+    section?: string;
     granularity?: string;
     agentSort?: string;
     agentDir?: string;
@@ -69,6 +77,20 @@ export default async function DashboardPage({
   const dashboard = await getDashboardData(searchParams, {
     includeAdminAlerts: context.role === "admin"
   });
+  const overviewSection = parseOverviewSection(searchParams?.section);
+  const baseParams = {
+    start: dashboard.filters.startDate,
+    end: dashboard.filters.endDate,
+    client: dashboard.filters.clientId,
+    agent: dashboard.filters.agentId,
+    view: dashboard.view,
+    section: overviewSection,
+    granularity: dashboard.granularity,
+    agentSort: dashboard.leaderboard.sort.key,
+    agentDir: dashboard.leaderboard.sort.direction,
+    clientSort: dashboard.clients.sort.key,
+    clientDir: dashboard.clients.sort.direction
+  };
 
   return (
     <div className="space-y-8">
@@ -77,16 +99,7 @@ export default async function DashboardPage({
         clients={dashboard.visibleClients}
         filters={dashboard.filters}
         queryState={{
-          start: dashboard.filters.startDate,
-          end: dashboard.filters.endDate,
-          client: dashboard.filters.clientId,
-          agent: dashboard.filters.agentId,
-          view: dashboard.view,
-          granularity: dashboard.granularity,
-          agentSort: dashboard.leaderboard.sort.key,
-          agentDir: dashboard.leaderboard.sort.direction,
-          clientSort: dashboard.clients.sort.key,
-          clientDir: dashboard.clients.sort.direction
+          ...baseParams
         }}
         role={context.role}
         view={dashboard.view}
@@ -102,19 +115,8 @@ export default async function DashboardPage({
         </section>
       ) : (
         dashboard.view === "agents" ? (
-          <AgentLeaderboardTable
-            params={{
-              start: dashboard.filters.startDate,
-              end: dashboard.filters.endDate,
-              client: dashboard.filters.clientId,
-              agent: dashboard.filters.agentId,
-              view: dashboard.view,
-              granularity: dashboard.granularity,
-              agentSort: dashboard.leaderboard.sort.key,
-              agentDir: dashboard.leaderboard.sort.direction,
-              clientSort: dashboard.clients.sort.key,
-              clientDir: dashboard.clients.sort.direction
-            }}
+            <AgentLeaderboardTable
+            params={baseParams}
             rows={dashboard.leaderboard.rows}
             selectedAgentName={dashboard.selectedAgent?.name ?? null}
             sort={dashboard.leaderboard.sort}
@@ -124,86 +126,52 @@ export default async function DashboardPage({
             hardestClientId={dashboard.clients.hardestClientId}
             easiestClientId={dashboard.clients.easiestClientId}
             params={{
-              start: dashboard.filters.startDate,
-              end: dashboard.filters.endDate,
-              client: dashboard.filters.clientId,
-              agent: dashboard.filters.agentId,
-              view: dashboard.view,
-              granularity: dashboard.granularity,
-              agentSort: dashboard.leaderboard.sort.key,
-              agentDir: dashboard.leaderboard.sort.direction,
-              clientSort: dashboard.clients.sort.key,
-              clientDir: dashboard.clients.sort.direction
+              ...baseParams
             }}
             rows={dashboard.clients.rows}
             sort={dashboard.clients.sort}
           />
         ) : (
           <>
-          <section className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-semibold tracking-tight">Overview</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Headline portfolio metrics for the current date window.</p>
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+            <div className="rounded-[32px] border border-border/60 bg-gradient-to-br from-emerald-50 via-background to-amber-50 p-6 shadow-panel">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Portfolio overview</p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight">Operational analytics for the current window</h2>
+              <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+                Ticket volume, reply workload, service levels, and staffing signals are separated so the dashboard does
+                not blur ticket counts into contact throughput.
+              </p>
             </div>
-            <ExportControls
-              csvHref={buildHref("/api/dashboard/export/csv", {
-                start: dashboard.filters.startDate,
-                end: dashboard.filters.endDate,
-                client: dashboard.filters.clientId,
-                agent: dashboard.filters.agentId,
-                view: dashboard.view,
-                granularity: dashboard.granularity,
-                agentSort: dashboard.leaderboard.sort.key,
-                agentDir: dashboard.leaderboard.sort.direction,
-                clientSort: dashboard.clients.sort.key,
-                clientDir: dashboard.clients.sort.direction
-              }, { report: "overview" })}
-              pdfHref={buildHref("/api/dashboard/export/pdf", {
-                start: dashboard.filters.startDate,
-                end: dashboard.filters.endDate,
-                client: dashboard.filters.clientId,
-                agent: dashboard.filters.agentId,
-                view: dashboard.view,
-                granularity: dashboard.granularity,
-                agentSort: dashboard.leaderboard.sort.key,
-                agentDir: dashboard.leaderboard.sort.direction,
-                clientSort: dashboard.clients.sort.key,
-                clientDir: dashboard.clients.sort.direction
-              }, { report: "overview" })}
-            />
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <GranularityToggle granularity={dashboard.granularity} params={baseParams} pathname="/dashboard" />
+              <ExportControls
+                csvHref={buildHref("/api/dashboard/export/csv", baseParams, { report: "overview" })}
+                pdfHref={buildHref("/api/dashboard/export/pdf", baseParams, { report: "overview" })}
+              />
+            </div>
           </section>
+          <OverviewSectionSwitcher params={baseParams} section={overviewSection} />
           {context.role === "admin" ? <SlaAlertFeed alerts={dashboard.alerts} /> : null}
-          {dashboard.sla ? (
-            <section className="grid gap-4 xl:grid-cols-2">
-              <SlaComplianceCard
-                description="Client-specific targets rolled into the current portfolio scope."
-                metric={dashboard.sla.firstReply}
-                targetLabel="Client-specific"
-                title="First reply SLA"
-              />
-              <SlaComplianceCard
-                description="Compliance across configured clients in the selected window."
-                metric={dashboard.sla.fullResolution}
-                targetLabel="Client-specific"
-                title="Full resolution SLA"
-              />
-            </section>
-          ) : (
-            <section className="rounded-[28px] border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">
-              SLA targets have not been configured for the visible client scope yet. Admins can add them on the
-              Connections page to unlock compliance tracking and alerts.
-            </section>
-          )}
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
             <MetricCard
-              title="Interactions per hour worked"
-              value={formatNumber(dashboard.overview.interactionsPerHourWorked, 2)}
-              description="Headline throughput built from total ticket interactions divided by scheduled Connecteam hours."
+              title="Reply contacts per hour"
+              value={formatNumber(dashboard.overview.repliesPerHourWorked, 2)}
+              description="Zendesk replies divided by matched Connecteam hours. This is the contact throughput KPI."
             />
             <MetricCard
-              title="Total interactions"
+              title="Tickets per hour worked"
+              value={formatNumber(dashboard.overview.interactionsPerHourWorked, 2)}
+              description="Ticket volume divided by matched hours. Useful for intake load, not direct contact throughput."
+            />
+            <MetricCard
+              title="Total tickets"
               value={formatNumber(dashboard.overview.totalInteractions, 0)}
-              description="Tickets handled inside the selected date window after client and agent filters are applied."
+              description="Zendesk tickets handled inside the selected date window after client and agent filters."
+            />
+            <MetricCard
+              title="Total replies"
+              value={formatNumber(dashboard.overview.totalReplies, 0)}
+              description="Reply events captured from the synced Zendesk ticket metrics payload."
             />
             <MetricCard
               title="Agent utilisation"
@@ -215,66 +183,170 @@ export default async function DashboardPage({
               value={formatNumber(dashboard.overview.repliesPerTicket, 2)}
               description="Average Zendesk replies captured in the synced ticket metric payload."
             />
-            <MetricCard
-              title="Requester wait time"
-              value={formatMinutes(dashboard.overview.requesterWaitTimeMinutes)}
-              description="Average requester wait minutes, using Zendesk ticket metric payload requester wait data."
-            />
-            <MetricCard
-              title="Reopens per agent"
-              value={formatNumber(dashboard.overview.reopensPerAgent, 2)}
-              description="Average reopen count across agents with activity in the selected window."
-            />
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-2">
-            <ServiceLevelCard
-              average={dashboard.overview.avgFirstReplyMinutes}
-              description="Selected-range distribution"
-              median={dashboard.overview.medianFirstReplyMinutes}
-              p90={dashboard.overview.p90FirstReplyMinutes}
-              title="First reply time"
+          {overviewSection === "operations" ? (
+            <>
+            <section className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+              <LineChartCard
+                data={dashboard.trends.volume.map((point) => ({
+                  date: point.date,
+                  primary: point.interactions,
+                  secondary: point.hoursWorked
+                }))}
+                description="Hover the chart to inspect how ticket volume and staffed hours moved together across the selected periods."
+                primaryColor="#0f766e"
+                primaryLabel="Tickets"
+                secondaryColor="#d97706"
+                secondaryLabel="Hours worked"
+                title="Ticket load vs staffed hours"
+              />
+              <Card className="border-border/60 bg-card/95">
+                <CardHeader>
+                  <CardTitle>Throughput diagnostic</CardTitle>
+                  <CardDescription>Why the previous contact KPI could read as obviously wrong.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 text-sm text-muted-foreground">
+                  <div className="rounded-2xl bg-muted/40 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em]">Previous logic</p>
+                    <p className="mt-2 text-foreground">
+                      Ticket count was displayed as a per-hour contact metric, which inflates or understates real workload
+                      whenever tickets carry multiple replies.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-muted/40 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em]">Now separated</p>
+                    <p className="mt-2 text-foreground">
+                      `Reply contacts/hour` uses reply count. `Tickets/hour` remains available as intake load.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-muted/40 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em]">Current ratio</p>
+                    <p className="mt-2 text-2xl font-semibold text-foreground">
+                      {formatNumber(dashboard.overview.repliesPerTicket, 2)}
+                    </p>
+                    <p className="mt-1">Replies per ticket in the selected scope.</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+
+            <ChannelStackedCard
+              data={dashboard.trends.channel}
+              description="Daily interaction mix by channel. Email, chat, phone, and remaining sources are broken out."
+              title="Channel mix over time"
             />
-            <ServiceLevelCard
-              average={dashboard.overview.avgFullResolutionMinutes}
-              description="Selected-range distribution"
-              median={dashboard.overview.medianFullResolutionMinutes}
-              p90={dashboard.overview.p90FullResolutionMinutes}
-              title="Full resolution time"
-            />
-            <LineChartCard
-              data={dashboard.trends.volume.map((point) => ({
-                date: point.date,
-                primary: point.interactions,
-                secondary: point.hoursWorked
-              }))}
-              description="Daily throughput against scheduled hours worked for the current filter set."
-              primaryColor="#0f766e"
-              primaryLabel="Interactions"
-              secondaryColor="#d97706"
-              secondaryLabel="Hours worked"
-              title="Volume vs hours"
-            />
+            </>
+          ) : null}
+
+          {overviewSection === "service" ? (
+            <>
+            {dashboard.sla ? (
+              <section className="grid gap-4 xl:grid-cols-2">
+                <SlaComplianceCard
+                  description="Client-specific targets rolled into the current portfolio scope."
+                  metric={dashboard.sla.firstReply}
+                  targetLabel="Client-specific"
+                  title="First reply SLA"
+                />
+                <SlaComplianceCard
+                  description="Compliance across configured clients in the selected window."
+                  metric={dashboard.sla.fullResolution}
+                  targetLabel="Client-specific"
+                  title="Full resolution SLA"
+                />
+              </section>
+            ) : (
+              <section className="rounded-[28px] border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground">
+                SLA targets have not been configured for the visible client scope yet. Admins can add them on the
+                Connections page to unlock compliance tracking and alerts.
+              </section>
+            )}
+
+            <section className="grid gap-4 xl:grid-cols-2">
+              <ServiceLevelCard
+                average={dashboard.overview.avgFirstReplyMinutes}
+                description="Selected-range distribution"
+                median={dashboard.overview.medianFirstReplyMinutes}
+                p90={dashboard.overview.p90FirstReplyMinutes}
+                title="First reply time"
+              />
+              <ServiceLevelCard
+                average={dashboard.overview.avgFullResolutionMinutes}
+                description="Selected-range distribution"
+                median={dashboard.overview.medianFullResolutionMinutes}
+                p90={dashboard.overview.p90FullResolutionMinutes}
+                title="Full resolution time"
+              />
+            </section>
+
             <LineChartCard
               data={dashboard.trends.response.map((point) => ({
                 date: point.date,
                 primary: point.avgFirstReplyMinutes,
                 secondary: point.avgFullResolutionMinutes
               }))}
-              description="Daily response and resolution averages, read back from precomputed daily rollups."
+              description="Hover the chart to inspect period-by-period service performance using the same precomputed rollups as the cards."
               primaryColor="#0f4c81"
               primaryLabel="Avg first reply"
               secondaryColor="#7c6f64"
               secondaryLabel="Avg full resolution"
               title="Service trend"
             />
-          </section>
+            </>
+          ) : null}
 
-          <ChannelStackedCard
-            data={dashboard.trends.channel}
-            description="Daily interaction mix by channel. Email, chat, phone, and all remaining sources are broken out."
-            title="Channel mix over time"
-          />
+          {overviewSection === "workforce" ? (
+            <>
+            <section className="grid gap-4 xl:grid-cols-3">
+              <Card className="border-border/60 bg-card/95">
+                <CardHeader>
+                  <CardDescription>Coverage</CardDescription>
+                  <CardTitle>{formatPercent(dashboard.overview.agentUtilisationRatio)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  Activity-day hours divided by total logged hours. High numbers mean the team is spending more of its
+                  scheduled time on days with ticket demand.
+                </CardContent>
+              </Card>
+              <Card className="border-border/60 bg-card/95">
+                <CardHeader>
+                  <CardDescription>Wait pressure</CardDescription>
+                  <CardTitle>{formatMinutes(dashboard.overview.requesterWaitTimeMinutes)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  Average requester wait from the Zendesk metrics payload. Use this with utilisation before reading
+                  capacity as purely an hours problem.
+                </CardContent>
+              </Card>
+              <Card className="border-border/60 bg-card/95">
+                <CardHeader>
+                  <CardDescription>Reopens per active agent</CardDescription>
+                  <CardTitle>{formatNumber(dashboard.overview.reopensPerAgent, 2)}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  Reopens normalised by agents with activity in the current scope.
+                </CardContent>
+              </Card>
+            </section>
+
+            <section className="grid gap-4 xl:grid-cols-2">
+              <ClientComparisonView
+                hardestClientId={dashboard.clients.hardestClientId}
+                easiestClientId={dashboard.clients.easiestClientId}
+                params={{ ...baseParams, view: "clients" }}
+                rows={dashboard.clients.rows.slice(0, 5)}
+                sort={dashboard.clients.sort}
+              />
+              <AgentLeaderboardTable
+                params={{ ...baseParams, view: "agents" }}
+                rows={dashboard.leaderboard.rows.slice(0, 5)}
+                selectedAgentName={dashboard.selectedAgent?.name ?? null}
+                sort={dashboard.leaderboard.sort}
+              />
+            </section>
+            </>
+          ) : null}
           </>
         )
       )}

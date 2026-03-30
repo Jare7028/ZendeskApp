@@ -71,16 +71,21 @@ export default async function AgentDetailPage({
         />
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard
-          title="Total interactions"
+          title="Total tickets"
           value={formatNumber(detail.overview.totalInteractions, 0)}
-          description="Interactions handled by this agent in the selected window."
+          description="Zendesk tickets handled by this agent in the selected window."
         />
         <MetricCard
-          title="Interactions per hour worked"
+          title="Reply contacts per hour"
+          value={formatNumber(detail.overview.repliesPerHourWorked, 2)}
+          description="Reply count divided by matched Connecteam hours."
+        />
+        <MetricCard
+          title="Tickets per hour worked"
           value={formatNumber(detail.overview.interactionsPerHourWorked, 2)}
-          description="Total interactions divided by matched Connecteam hours."
+          description="Ticket count divided by matched Connecteam hours."
         />
         <MetricCard
           title="Utilisation"
@@ -106,7 +111,7 @@ export default async function AgentDetailPage({
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl bg-muted/40 p-4">
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client throughput</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client tickets/hr</p>
               <p className="mt-2 text-2xl font-semibold">
                 {formatNumber(detail.clientContext?.interactionsPerHourWorked ?? null, 2)}
               </p>

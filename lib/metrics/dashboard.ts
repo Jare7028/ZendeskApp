@@ -152,7 +152,9 @@ export type SlaSummary = {
 
 export type DashboardOverview = {
   totalInteractions: number;
+  totalReplies: number;
   interactionsPerHourWorked: number | null;
+  repliesPerHourWorked: number | null;
   agentUtilisationRatio: number | null;
   repliesPerTicket: number | null;
   reopensPerAgent: number | null;
@@ -889,7 +891,9 @@ function emptyServiceStats(): ServiceStats {
 function emptyOverview(): DashboardOverview {
   return {
     totalInteractions: 0,
+    totalReplies: 0,
     interactionsPerHourWorked: null,
+    repliesPerHourWorked: null,
     agentUtilisationRatio: null,
     repliesPerTicket: null,
     reopensPerAgent: null,
@@ -930,8 +934,11 @@ function buildOverview(rows: ComputedMetricRow[], serviceStats: ServiceStats, ac
 
   return {
     totalInteractions: summary.totalInteractions,
+    totalReplies: summary.totalReplies,
     interactionsPerHourWorked:
       summary.totalHoursWorked > 0 ? summary.totalInteractions / summary.totalHoursWorked : null,
+    repliesPerHourWorked:
+      summary.totalHoursWorked > 0 ? summary.totalReplies / summary.totalHoursWorked : null,
     agentUtilisationRatio:
       summary.totalHoursWorked > 0 ? summary.totalActivityHours / summary.totalHoursWorked : null,
     repliesPerTicket: summary.totalInteractions > 0 ? summary.totalReplies / summary.totalInteractions : null,
