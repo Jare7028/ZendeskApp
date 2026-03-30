@@ -30,7 +30,10 @@ export async function GET(request: Request) {
   try {
     const authorizeUrl = await beginZendeskOAuth(connectionId);
     return NextResponse.redirect(authorizeUrl);
-  } catch {
-    return redirectToConnections(request, "oauth-start-failed");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown Zendesk OAuth start error";
+    const response = redirectToConnections(request, "oauth-start-failed");
+    response.headers.set("x-zendesk-oauth-start-error", detail);
+    return response;
   }
 }
