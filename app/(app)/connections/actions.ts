@@ -261,11 +261,26 @@ export async function saveZendeskConnecteamScheduleAction(formData: FormData) {
       connecteamConnectionId,
       schedulerId: schedulerIdRaw || null
     });
+
+    let refreshCompleted = false;
+    try {
+      await runConnecteamPostConnectionSync(connecteamConnectionId);
+      refreshCompleted = true;
+    } catch {
+      // Preserve the assignment save even if the downstream refresh fails.
+    }
+
     revalidatePath("/connections");
+    revalidatePath("/dashboard");
     revalidatePath("/admin");
-    redirect(buildConnectionsRedirect("connecteam-schedule-saved"));
+    redirect(
+      buildConnectionsRedirect(
+        refreshCompleted ? "connecteam-schedule-saved" : "connecteam-schedule-saved-refresh-failed"
+      )
+    );
   } catch (error) {
     revalidatePath("/connections");
+    revalidatePath("/dashboard");
     redirect(
       buildConnectionsRedirect(
         "connecteam-schedule-save-failed",

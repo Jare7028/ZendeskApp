@@ -95,7 +95,15 @@ function formatConnectionMessage(status: string | undefined, detail: string | un
         message: `Connecteam API key validated but the initial sync could not be started${suffix}.`
       } satisfies FlashMessage;
     case "connecteam-schedule-saved":
-      return { tone: "success", message: `Connecteam scheduler assignment saved${suffix}.` } satisfies FlashMessage;
+      return {
+        tone: "success",
+        message: `Connecteam scheduler assignment saved and downstream schedules were refreshed${suffix}.`
+      } satisfies FlashMessage;
+    case "connecteam-schedule-saved-refresh-failed":
+      return {
+        tone: "error",
+        message: `Connecteam scheduler assignment saved, but the downstream refresh failed${suffix}.`
+      } satisfies FlashMessage;
     case "connecteam-tested":
       return { tone: "success", message: `Connecteam connection test passed${suffix}.` } satisfies FlashMessage;
     case "connecteam-disconnected":
