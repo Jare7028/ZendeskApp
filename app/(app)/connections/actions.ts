@@ -9,6 +9,7 @@ import {
   disconnectConnecteamConnection,
   testConnecteamConnection
 } from "@/lib/connecteam/connection";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import {
   disconnectZendeskConnection,
@@ -41,10 +42,7 @@ async function requireAdmin() {
 }
 
 export async function createClientAction(formData: FormData) {
-  const context = await getCurrentUserContext();
-  if (!context || context.role !== "admin") {
-    redirect("/dashboard");
-  }
+  await requireAdmin();
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) {
@@ -57,14 +55,30 @@ export async function createClientAction(formData: FormData) {
     .replace(/^-|-$/g, "");
 
   const supabase = createServerSupabaseClient().schema("app");
-  const { error } = await supabase.from("clients").insert({ name, slug });
+
+  const { data: existingClient, error: existingClientError } = await supabase
+    .from("clients")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (existingClientError) {
+    redirect(buildConnectionsRedirect("client-create-failed", existingClientError.message));
+  }
+
+  if (existingClient?.id) {
+    redirect(buildConnectionsRedirect("client-already-exists"));
+  }
+
+  const adminSupabase = createAdminSupabaseClient();
+  const { error } = await adminSupabase.from("clients").insert({ name, slug });
 
   if (error) {
-    redirect(`/connections?connection=client-create-failed&detail=${encodeURIComponent(error.message)}`);
+    redirect(buildConnectionsRedirect("client-create-failed", error.message));
   }
 
   revalidatePath("/connections");
-  redirect("/connections?connection=client-created");
+  redirect(buildConnectionsRedirect("client-created"));
 }
 
 export async function createZendeskConnectionAction(formData: FormData) {
