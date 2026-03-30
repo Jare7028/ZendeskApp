@@ -59,11 +59,13 @@ type SyncConnectionOptions = {
   trigger: RunTrigger;
   mode?: RunMode;
   backfillPageBudget?: number;
+  drainBackfill?: boolean;
 };
 
 const SYNC_LOCK_MINUTES = 15;
 const INCREMENTAL_PAGE_BUDGET = 5;
 const BACKFILL_PAGE_BUDGET = 2;
+const MAX_DRAINED_BACKFILL_RUNS = 50;
 const WATERMARK_OVERLAP_SECONDS = 120;
 
 function isoNow() {
@@ -191,7 +193,10 @@ async function finalizeRun(
   counts: SyncCounts,
   details: Record<string, Json>,
   updates: Partial<ConnectionRow>,
-  errorMessage?: string
+  errorMessage?: string,
+  options?: {
+    markLastSyncedAt?: boolean;
+  }
 ) {
   const completedAt = isoNow();
 
@@ -223,7 +228,9 @@ async function finalizeRun(
       last_sync_completed_at: completedAt,
       last_sync_status: status,
       last_sync_error: errorMessage ?? null,
-      ...(status !== "failed" ? { last_synced_at: completedAt } : {}),
+      ...(status !== "failed" && options?.markLastSyncedAt !== false
+        ? { last_synced_at: completedAt }
+        : {}),
       ...updates
     })
     .eq("id", connection.id);
@@ -718,15 +725,25 @@ async function runConnectionSync(
       syncMode === "backfill"
         ? await runBackfillSync(supabase, connection, client, run.id, backfillPageBudget)
         : await runIncrementalSync(supabase, connection, client);
+    const isIncompleteBackfill =
+      syncMode === "backfill" &&
+      "backfill_complete" in result.details &&
+      result.details.backfill_complete !== true;
+    const runStatus =
+      isIncompleteBackfill || result.counts.skippedMetrics > 0 ? "partial" : "succeeded";
 
     await finalizeRun(
       supabase,
       connection,
       run.id,
-      result.counts.skippedMetrics > 0 ? "partial" : "succeeded",
+      runStatus,
       result.counts,
       result.details,
-      result.updates
+      result.updates,
+      undefined,
+      {
+        markLastSyncedAt: !isIncompleteBackfill
+      }
     );
 
     return { runId: run.id, syncMode, ...result };
@@ -825,7 +842,8 @@ export async function startZendeskBackfill({
     connectionId,
     trigger,
     mode: "backfill",
-    backfillPageBudget
+    backfillPageBudget,
+    drainBackfill: true
   });
 }
 
@@ -848,7 +866,8 @@ export async function runZendeskPostOAuthSync(connectionId: string) {
       connectionId,
       trigger: "oauth",
       mode: "backfill",
-      backfillPageBudget: BACKFILL_PAGE_BUDGET
+      backfillPageBudget: BACKFILL_PAGE_BUDGET,
+      drainBackfill: true
     });
   }
 
@@ -857,7 +876,8 @@ export async function runZendeskPostOAuthSync(connectionId: string) {
       connectionId,
       trigger: "oauth",
       mode: "backfill",
-      backfillPageBudget: BACKFILL_PAGE_BUDGET
+      backfillPageBudget: BACKFILL_PAGE_BUDGET,
+      drainBackfill: true
     });
   }
 
@@ -874,19 +894,48 @@ export async function runZendeskSyncJob(options: SyncConnectionOptions) {
   const results = [];
 
   for (const connection of connections.slice(0, options.connectionId ? 1 : 3)) {
-    const result = await runConnectionSync(
-      supabase,
-      connection.id,
-      options.trigger,
-      options.mode,
-      options.backfillPageBudget
-    );
+    let drainedRuns = 0;
 
-    if (result) {
+    while (drainedRuns < MAX_DRAINED_BACKFILL_RUNS) {
+      const result = await runConnectionSync(
+        supabase,
+        connection.id,
+        options.trigger,
+        options.mode,
+        options.backfillPageBudget
+      );
+
+      if (!result) {
+        break;
+      }
+
       results.push({
         connectionId: connection.id,
         ...result
       });
+
+      const shouldDrain =
+        options.drainBackfill === true &&
+        (options.mode === "backfill" || result.syncMode === "backfill");
+      if (!shouldDrain) {
+        break;
+      }
+
+      const backfill = await getBackfill(supabase, connection.id);
+      if (!backfill || backfill.status === "completed") {
+        break;
+      }
+
+      drainedRuns += 1;
+    }
+
+    if (options.drainBackfill === true) {
+      const backfill = await getBackfill(supabase, connection.id);
+      if (backfill && backfill.status !== "completed") {
+        throw new Error(
+          `Zendesk backfill for connection ${connection.id} did not complete after ${MAX_DRAINED_BACKFILL_RUNS} runs.`
+        );
+      }
     }
   }
 
