@@ -11,6 +11,7 @@ import {
 type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
 type AdminSupabaseClient = ReturnType<typeof createAdminSupabaseClient>;
 type RunTrigger = "cron" | "manual";
+type AgentInclusionStatus = "mapped" | "ignored" | "unmapped";
 
 type SyncConnectionOptions = {
   connectionId?: string;
@@ -891,7 +892,7 @@ async function getExistingMappings(
   let query = supabase
     .from("agent_mappings")
     .select(
-      "id,client_id,zendesk_connection_id,connecteam_connection_id,zendesk_agent_id,connecteam_user_id,display_name,email,zendesk_agent_name,connecteam_user_name,match_source,manual_override"
+      "id,client_id,zendesk_connection_id,connecteam_connection_id,zendesk_agent_id,connecteam_user_id,display_name,email,zendesk_agent_name,connecteam_user_name,match_source,manual_override,inclusion_status"
     )
     .eq("client_id", clientId)
     .eq("connecteam_connection_id", connectionId);
@@ -919,6 +920,7 @@ async function getExistingMappings(
     connecteam_user_name: string | null;
     match_source: "auto" | "manual" | "unmatched";
     manual_override: boolean;
+    inclusion_status: AgentInclusionStatus;
   }>;
 }
 
@@ -996,6 +998,7 @@ async function autoMatchAgents(
         email,
         zendesk_agent_name: agent.name,
         connecteam_user_name: connecteamUserName,
+        inclusion_status: connecteamUserId ? "mapped" : "unmapped",
         match_source: connecteamUserId ? "auto" : "unmatched",
         manual_override: false,
         matched_at: isoNow()
@@ -1011,6 +1014,7 @@ async function autoMatchAgents(
       .update({
         connecteam_user_id: null,
         connecteam_user_name: null,
+        inclusion_status: "unmapped",
         match_source: "unmatched",
         matched_at: isoNow()
       })
@@ -1296,9 +1300,11 @@ export async function saveAgentMappingOverride(options: {
   connecteamConnectionId: string;
   zendeskAgentId: string;
   connecteamUserId: string | null;
+  inclusionStatus: AgentInclusionStatus;
 }) {
   const supabase = createAdminSupabaseClient();
-  const { clientId, zendeskConnectionId, connecteamConnectionId, zendeskAgentId, connecteamUserId } = options;
+  const { clientId, zendeskConnectionId, connecteamConnectionId, zendeskAgentId, connecteamUserId, inclusionStatus } =
+    options;
 
   const [{ data: zendeskAgent, error: zendeskError }, { data: connecteamUser, error: userError }] =
     await Promise.all([
@@ -1333,6 +1339,7 @@ export async function saveAgentMappingOverride(options: {
       .update({
         connecteam_user_id: null,
         connecteam_user_name: null,
+        inclusion_status: "unmapped",
         match_source: "unmatched",
         matched_at: isoNow()
       })
@@ -1351,7 +1358,7 @@ export async function saveAgentMappingOverride(options: {
     zendesk_connection_id: zendeskConnectionId,
     connecteam_connection_id: connecteamConnectionId,
     zendesk_agent_id: zendeskAgentId,
-    connecteam_user_id: connecteamUserId,
+    connecteam_user_id: inclusionStatus === "mapped" ? connecteamUserId : null,
     display_name:
       (zendeskAgent?.name as string | null) ??
       (connecteamUser?.full_name as string | null) ??
@@ -1359,9 +1366,10 @@ export async function saveAgentMappingOverride(options: {
       "Mapped agent",
     email: normalizeEmail(zendeskAgent?.email ?? connecteamUser?.email),
     zendesk_agent_name: (zendeskAgent?.name as string | null) ?? null,
-    connecteam_user_name: (connecteamUser?.full_name as string | null) ?? null,
-    match_source: connecteamUserId ? "manual" : "unmatched",
-    manual_override: true,
+    connecteam_user_name: inclusionStatus === "mapped" ? ((connecteamUser?.full_name as string | null) ?? null) : null,
+    inclusion_status: inclusionStatus,
+    match_source: inclusionStatus === "mapped" ? "manual" : "unmatched",
+    manual_override: inclusionStatus !== "unmapped",
     matched_at: isoNow()
   };
 

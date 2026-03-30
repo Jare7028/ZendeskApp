@@ -431,6 +431,7 @@ async function getVisibleAgents(clientIds: string[]) {
       .from("agent_mappings")
       .select("id,client_id,display_name,zendesk_agent_id")
       .in("client_id", clientIds)
+      .eq("inclusion_status", "mapped")
       .not("zendesk_agent_id", "is", null)
       .order("display_name"),
     supabase.from("clients").select("id,name").in("id", clientIds)

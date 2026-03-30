@@ -10,6 +10,7 @@ type AgentMappingRow = {
   zendesk_agent_id: string | null;
   connecteam_user_id: string | null;
   display_name: string;
+  inclusion_status: "mapped" | "ignored" | "unmapped";
 };
 
 type TicketRow = {
@@ -336,7 +337,7 @@ export async function recomputeComputedMetricsForDateRange({
   const [agentMappingsResult, ticketsResult, timesheetsResult] = await Promise.all([
     supabase
       .from("agent_mappings")
-      .select("id,client_id,zendesk_agent_id,connecteam_user_id,display_name")
+      .select("id,client_id,zendesk_agent_id,connecteam_user_id,display_name,inclusion_status")
       .in("client_id", clientIds),
     supabase
       .from("tickets")
@@ -396,14 +397,15 @@ export async function recomputeComputedMetricsForDateRange({
     }
   }
 
-  const mappingById = new Map(agentMappings.map((mapping) => [mapping.id, mapping]));
+  const includedMappings = agentMappings.filter((mapping) => mapping.inclusion_status === "mapped");
+  const mappingById = new Map(includedMappings.map((mapping) => [mapping.id, mapping]));
   const mappingByZendeskAgentId = new Map(
-    agentMappings
+    includedMappings
       .filter((mapping) => mapping.zendesk_agent_id)
       .map((mapping) => [mapping.zendesk_agent_id as string, mapping])
   );
   const mappingByConnecteamUserId = new Map(
-    agentMappings
+    includedMappings
       .filter((mapping) => mapping.connecteam_user_id)
       .map((mapping) => [mapping.connecteam_user_id as string, mapping])
   );
@@ -466,16 +468,16 @@ export async function recomputeComputedMetricsForDateRange({
         ? mappingByConnecteamUserId.get(String(timesheet.payload.connecteam_user_id))
         : null) ??
       null;
-    const clientAccumulator = getAccumulator(store, timesheet.client_id, timesheet.work_date, { scope: "client" });
-
-    clientAccumulator.totalMinutesWorked += timesheet.minutes_worked;
-
-    if (agentMapping && activityDaysByAgent.has(`${agentMapping.id}:${timesheet.work_date}`)) {
-      clientAccumulator.activeMinutesWorked += timesheet.minutes_worked;
-    }
 
     if (!agentMapping) {
       continue;
+    }
+
+    const clientAccumulator = getAccumulator(store, timesheet.client_id, timesheet.work_date, { scope: "client" });
+    clientAccumulator.totalMinutesWorked += timesheet.minutes_worked;
+
+    if (activityDaysByAgent.has(`${agentMapping.id}:${timesheet.work_date}`)) {
+      clientAccumulator.activeMinutesWorked += timesheet.minutes_worked;
     }
 
     const agentAccumulator = getAccumulator(store, timesheet.client_id, timesheet.work_date, {

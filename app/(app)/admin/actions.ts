@@ -6,6 +6,8 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUserContext } from "@/lib/auth/session";
 import { saveAgentMappingOverride } from "@/lib/connecteam/sync";
 
+const IGNORE_MAPPING_VALUE = "__ignore__";
+
 function buildAdminRedirect(status: string, detail?: string) {
   const search = new URLSearchParams({ sync: status });
 
@@ -44,12 +46,16 @@ export async function saveAgentMappingOverrideAction(formData: FormData) {
   }
 
   try {
+    const inclusionStatus =
+      connecteamUserIdRaw === IGNORE_MAPPING_VALUE ? "ignored" : connecteamUserIdRaw ? "mapped" : "unmapped";
+
     await saveAgentMappingOverride({
       clientId,
       zendeskConnectionId,
       connecteamConnectionId,
       zendeskAgentId,
-      connecteamUserId: connecteamUserIdRaw || null
+      connecteamUserId: inclusionStatus === "mapped" ? connecteamUserIdRaw : null,
+      inclusionStatus
     });
     revalidatePath("/admin");
     redirect(buildAdminRedirect("mapping-saved"));

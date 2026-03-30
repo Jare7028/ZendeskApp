@@ -11,6 +11,8 @@ import { getConnecteamAdminOverview } from "@/lib/connecteam/status";
 import { getZendeskConnectionStatus } from "@/lib/zendesk/status";
 import { saveAgentMappingOverrideAction } from "./actions";
 
+const IGNORE_MAPPING_VALUE = "__ignore__";
+
 function formatDateTime(value: string | null) {
   if (!value) {
     return "Not yet";
@@ -24,12 +26,23 @@ function formatDateTime(value: string | null) {
 }
 
 function badgeClassName(status: string) {
-  if (status === "active" || status === "succeeded" || status === "completed" || status === "idle" || status === "auto") {
+  if (
+    status === "active" ||
+    status === "succeeded" ||
+    status === "completed" ||
+    status === "idle" ||
+    status === "auto" ||
+    status === "mapped"
+  ) {
     return "bg-emerald-100 text-emerald-900";
   }
 
   if (status === "running" || status === "pending" || status === "partial" || status === "manual") {
     return "bg-amber-100 text-amber-900";
+  }
+
+  if (status === "ignored") {
+    return "bg-slate-200 text-slate-900";
   }
 
   return "bg-rose-100 text-rose-900";
@@ -313,9 +326,9 @@ export default async function AdminPage({
                   </div>
                   <div>
                     <p className="font-medium text-foreground">Mappings</p>
-                    <p>Auto {connection.mappingSummary.auto}</p>
-                    <p className="text-xs">Manual {connection.mappingSummary.manual}</p>
-                    <p className="text-xs">Unmatched {connection.mappingSummary.unmatched}</p>
+                    <p>Mapped {connection.mappingSummary.mapped}</p>
+                    <p className="text-xs">Ignored {connection.mappingSummary.ignored}</p>
+                    <p className="text-xs">Unmapped {connection.mappingSummary.unmapped}</p>
                   </div>
                   <div>
                     <p className="font-medium text-foreground">Scheduler assignments</p>
@@ -342,8 +355,8 @@ export default async function AdminPage({
                   <div className="space-y-1">
                     <h2 className="text-lg font-semibold text-foreground">Agent identity mapping</h2>
                     <p className="text-sm text-muted-foreground">
-                      Auto-match uses Zendesk agent email against Connecteam user email for this client. Manual
-                      overrides survive later syncs.
+                      Auto-match uses Zendesk agent email against Connecteam user email for this client. Only mapped
+                      agents are included in staffing metrics; ignored and unmapped agents stay excluded.
                     </p>
                   </div>
 
@@ -399,10 +412,15 @@ export default async function AdminPage({
                             <div className="space-y-2">
                               <select
                                 className="flex h-11 w-full rounded-2xl border border-input bg-background px-4 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-                                defaultValue={agent.mapping?.connecteam_user_id ?? ""}
+                                defaultValue={
+                                  agent.mapping?.inclusion_status === "ignored"
+                                    ? IGNORE_MAPPING_VALUE
+                                    : agent.mapping?.connecteam_user_id ?? ""
+                                }
                                 name="connecteamUserId"
                               >
-                                <option value="">No match / clear</option>
+                                <option value="">Unmapped (exclude by default)</option>
+                                <option value={IGNORE_MAPPING_VALUE}>Ignore intentionally</option>
                                 {assignment.users.map((user) => (
                                   <option key={user.connecteam_user_id} value={user.connecteam_user_id}>
                                     {user.full_name ?? user.email ?? user.connecteam_user_id}
@@ -413,6 +431,9 @@ export default async function AdminPage({
                             </div>
 
                             <div className="flex items-center gap-3">
+                              <Badge className={badgeClassName(agent.mapping?.inclusion_status ?? "unmapped")}>
+                                {agent.mapping?.inclusion_status ?? "unmapped"}
+                              </Badge>
                               <Badge className={badgeClassName(agent.mapping?.match_source ?? "unmatched")}>
                                 {agent.mapping?.match_source ?? "unmatched"}
                               </Badge>

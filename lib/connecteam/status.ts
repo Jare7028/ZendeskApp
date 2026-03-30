@@ -47,6 +47,7 @@ type MappingRow = {
   email: string | null;
   zendesk_agent_name: string | null;
   connecteam_user_name: string | null;
+  inclusion_status: "mapped" | "ignored" | "unmapped";
   match_source: "auto" | "manual" | "unmatched";
   manual_override: boolean;
 };
@@ -229,7 +230,7 @@ export async function getConnecteamAdminOverview() {
     supabase
       .from("agent_mappings")
       .select(
-        "id,client_id,zendesk_connection_id,connecteam_connection_id,zendesk_agent_id,connecteam_user_id,display_name,email,zendesk_agent_name,connecteam_user_name,match_source,manual_override"
+        "id,client_id,zendesk_connection_id,connecteam_connection_id,zendesk_agent_id,connecteam_user_id,display_name,email,zendesk_agent_name,connecteam_user_name,inclusion_status,match_source,manual_override"
       )
       .not("connecteam_connection_id", "is", null)
   ]);
@@ -308,9 +309,9 @@ export async function getConnecteamAdminOverview() {
       mappings: mappingRows,
       assignmentRows,
       mappingSummary: {
-        auto: mappingRows.filter((row) => row.match_source === "auto").length,
-        manual: mappingRows.filter((row) => row.match_source === "manual").length,
-        unmatched: mappingRows.filter((row) => row.match_source === "unmatched").length
+        mapped: mappingRows.filter((row) => row.inclusion_status === "mapped").length,
+        ignored: mappingRows.filter((row) => row.inclusion_status === "ignored").length,
+        unmapped: mappingRows.filter((row) => row.inclusion_status === "unmapped").length
       }
     };
   });

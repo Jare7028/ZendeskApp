@@ -437,7 +437,8 @@ async function upsertAgents(
       zendesk_agent_id: String(agent.id),
       display_name: agent.name?.trim() || normalizeEmail(agent.email) || "Unknown agent",
       email: normalizeEmail(agent.email),
-      zendesk_agent_name: agent.name?.trim() || null
+      zendesk_agent_name: agent.name?.trim() || null,
+      inclusion_status: "unmapped"
     })),
     {
       onConflict: "client_id,zendesk_connection_id,zendesk_agent_id"
