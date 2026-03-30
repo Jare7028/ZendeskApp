@@ -48,7 +48,7 @@ export function getOptionalZendeskOauthClientSecret() {
 }
 
 export function getZendeskOauthScopes() {
-  return process.env.ZENDESK_OAUTH_SCOPES?.trim() || "users:read";
+  return process.env.ZENDESK_OAUTH_SCOPES?.trim() || "read";
 }
 
 export function getResendApiKey() {
