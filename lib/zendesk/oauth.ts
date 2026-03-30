@@ -419,6 +419,8 @@ export async function completeZendeskOAuthCallback(params: {
   code: string | null;
   error: string | null;
   errorDescription: string | null;
+}, options?: {
+  onConnected?: (connection: { id: string; name: string }) => Promise<{ status: string; detail?: string } | void>;
 }) {
   if (!params.state) {
     return buildConnectionsRedirect("/connections", "oauth-missing-state");
@@ -488,6 +490,14 @@ export async function completeZendeskOAuthCallback(params: {
       validatedAt,
       clearOauthState: true
     });
+
+    const connectedResult = await options?.onConnected?.({
+      id: connection.id,
+      name: connection.name
+    });
+    if (connectedResult?.status) {
+      return buildConnectionsRedirect("/connections", connectedResult.status, connectedResult.detail);
+    }
 
     return buildConnectionsRedirect("/connections", "connected", connection.name);
   } catch (error) {

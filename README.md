@@ -42,7 +42,8 @@ Run the app locally with `npm run dev`.
   - `credential_type = 'api_token'` with `api_user_email` and `access_token_encrypted` populated
   - or `credential_type = 'oauth_token'` with `access_token_encrypted` populated
 - OAuth tokens are currently stored in the existing `*_encrypted` columns as application-managed secrets. This milestone keeps the storage explicit but does not add in-app encryption; database and environment handling must therefore be treated as trusted infrastructure.
-- Cron ingestion lives at `/api/cron/zendesk-sync` and requires `Authorization: Bearer $CRON_SECRET` or `?secret=$CRON_SECRET`.
+- Cron ingestion lives at `/api/cron/zendesk-sync` and requires `Authorization: Bearer $CRON_SECRET`, `X-Cron-Secret: $CRON_SECRET`, or `?secret=$CRON_SECRET`.
+- `POST /api/cron/zendesk-sync` is a trusted server-side orchestration path for targeted Zendesk jobs without an admin browser session. Supported actions are `run_incremental`, `start_backfill`, and `restart_backfill`.
 - Manual admin-triggered runs post to `/api/admin/zendesk-sync`.
 - Durable sync state is stored in `app.zendesk_sync_runs`, `app.zendesk_backfills`, and the watermark/status columns on `app.zendesk_connections`.
 - Ticket payloads are stored in `app.tickets.raw_payload`, channel type is stored in `app.tickets.channel`, and agent records land in `app.zendesk_agents`.
@@ -56,7 +57,7 @@ Run the app locally with `npm run dev`.
   - use shared `ZENDESK_OAUTH_CLIENT_ID` / `ZENDESK_OAUTH_CLIENT_SECRET` only if they belong to a true Zendesk global OAuth client
   - otherwise, store a per-connection OAuth client ID and secret created inside that customer Zendesk account
   - start the Zendesk OAuth flow against `https://{subdomain}.zendesk.com`
-  - callback returns to `/auth/callback/zendesk`, exchanges the code, validates `/api/v2/users/me`, and stores tokens plus expiry and validation metadata
+  - callback returns to `/auth/callback/zendesk`, exchanges the code, validates `/api/v2/users/me`, stores tokens plus expiry and validation metadata, then automatically queues and starts the initial Zendesk backfill server-side
   - admins can test, re-authorize, and disconnect existing connections
 - OAuth refresh is handled server-side before sync and test requests. If Zendesk omits `expires_in`, the app refreshes when using a stored refresh token so later sync jobs still receive a current bearer token.
 

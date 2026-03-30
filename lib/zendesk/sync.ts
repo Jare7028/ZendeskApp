@@ -51,7 +51,7 @@ type SyncCounts = {
   skippedMetrics: number;
 };
 
-type RunTrigger = "cron" | "manual";
+export type RunTrigger = "cron" | "manual" | "oauth";
 type RunMode = "incremental" | "backfill";
 
 type SyncConnectionOptions = {
@@ -804,6 +804,47 @@ export async function enqueueZendeskBackfill(connectionId: string, reset = false
   }
 
   await ensureBackfillRecord(supabase, data as ConnectionRow, reset);
+}
+
+type StartZendeskBackfillOptions = {
+  connectionId: string;
+  trigger: RunTrigger;
+  reset?: boolean;
+  backfillPageBudget?: number;
+};
+
+export async function startZendeskBackfill({
+  connectionId,
+  trigger,
+  reset = false,
+  backfillPageBudget = BACKFILL_PAGE_BUDGET
+}: StartZendeskBackfillOptions) {
+  await enqueueZendeskBackfill(connectionId, reset);
+
+  return runZendeskSyncJob({
+    connectionId,
+    trigger,
+    mode: "backfill",
+    backfillPageBudget
+  });
+}
+
+export async function runZendeskPostOAuthSync(connectionId: string) {
+  const supabase = createAdminSupabaseClient();
+  const backfill = await getBackfill(supabase, connectionId);
+
+  if (!backfill || backfill.status !== "completed") {
+    return startZendeskBackfill({
+      connectionId,
+      trigger: "oauth"
+    });
+  }
+
+  return runZendeskSyncJob({
+    connectionId,
+    trigger: "oauth",
+    mode: "incremental"
+  });
 }
 
 export async function runZendeskSyncJob(options: SyncConnectionOptions) {

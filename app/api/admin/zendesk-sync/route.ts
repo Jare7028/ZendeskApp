@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUserContext } from "@/lib/auth/session";
-import { enqueueZendeskBackfill, runZendeskSyncJob } from "@/lib/zendesk/sync";
+import { runZendeskSyncJob, startZendeskBackfill } from "@/lib/zendesk/sync";
 
 function redirectToAdmin(request: Request, message: string) {
   const url = new URL("/admin", request.url);
@@ -39,11 +39,9 @@ export async function POST(request: Request) {
   }
 
   if (action === "start_backfill") {
-    await enqueueZendeskBackfill(connectionId, false);
-    await runZendeskSyncJob({
+    await startZendeskBackfill({
       connectionId,
       trigger: "manual",
-      mode: "backfill",
       backfillPageBudget: 2
     });
 
@@ -51,11 +49,10 @@ export async function POST(request: Request) {
   }
 
   if (action === "restart_backfill") {
-    await enqueueZendeskBackfill(connectionId, true);
-    await runZendeskSyncJob({
+    await startZendeskBackfill({
       connectionId,
       trigger: "manual",
-      mode: "backfill",
+      reset: true,
       backfillPageBudget: 2
     });
 

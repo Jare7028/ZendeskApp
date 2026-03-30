@@ -60,6 +60,16 @@ function formatConnectionMessage(status: string | undefined, detail: string | un
   switch (status) {
     case "connected":
       return { tone: "success", message: `Zendesk OAuth completed successfully${suffix}.` } satisfies FlashMessage;
+    case "connected-sync-started":
+      return {
+        tone: "success",
+        message: `Zendesk OAuth completed and the initial sync was started${suffix}.`
+      } satisfies FlashMessage;
+    case "connected-sync-failed":
+      return {
+        tone: "error",
+        message: `Zendesk OAuth completed but the initial sync could not be started${suffix}.`
+      } satisfies FlashMessage;
     case "tested":
       return { tone: "success", message: `Zendesk connection test passed${suffix}.` } satisfies FlashMessage;
     case "disconnected":
