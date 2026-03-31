@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Minus, Plus, Settings2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Minus, Plus, Settings2, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -133,6 +133,7 @@ export function DashboardWidgetInspector({
   onChangeWidgetType,
   disabled,
   onAddWidget,
+  onDeleteWidget,
   onMoveWidget,
   onResizeWidget,
   onSelectWidget,
@@ -145,6 +146,7 @@ export function DashboardWidgetInspector({
   onChangeWidgetType: (widgetId: string, nextType: DashboardWidgetType) => void;
   disabled: boolean;
   onAddWidget: () => void;
+  onDeleteWidget: (widgetId: string) => void;
   onMoveWidget: (widgetId: string, direction: "down" | "left" | "right" | "up") => void;
   onResizeWidget: (widgetId: string, dimension: "h" | "w", delta: number) => void;
   onSelectWidget: (widgetId: string) => void;
@@ -219,6 +221,15 @@ export function DashboardWidgetInspector({
               <Settings2 className="h-4 w-4 text-muted-foreground" />
               {selectedWidget.title}
             </div>
+            <Button
+              className="w-full justify-center gap-2 border-rose-200 text-rose-700 hover:bg-rose-50"
+              disabled={disabled}
+              onClick={() => onDeleteWidget(selectedWidget.id)}
+              variant="outline"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete widget
+            </Button>
 
             <InspectorField label="Widget title">
               <Input

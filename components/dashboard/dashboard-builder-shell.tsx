@@ -11,7 +11,8 @@ import {
   Minus,
   PanelTop,
   Plus,
-  Sparkles
+  Sparkles,
+  Trash2
 } from "lucide-react";
 
 import { DashboardTabBar } from "@/components/dashboard/dashboard-tab-bar";
@@ -493,7 +494,9 @@ function packWidgets(widgets: DashboardWidget[]) {
 }
 
 function DashboardBuilderWidgetCard({
+  disabled,
   isSelected,
+  onDelete,
   onMove,
   onResize,
   onSelect,
@@ -501,7 +504,9 @@ function DashboardBuilderWidgetCard({
   data,
   previousData
 }: {
+  disabled?: boolean;
   isSelected: boolean;
+  onDelete: () => void;
   onMove: (direction: LayoutDirection) => void;
   onResize: (dimension: LayoutDimension, delta: number) => void;
   onSelect: () => void;
@@ -527,7 +532,8 @@ function DashboardBuilderWidgetCard({
           <button
             key={direction}
             aria-label={label}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={disabled}
             onClick={(event) => {
               event.stopPropagation();
               onMove(direction);
@@ -542,7 +548,7 @@ function DashboardBuilderWidgetCard({
         <button
           aria-label="Decrease width"
           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!canShrinkWidth}
+          disabled={disabled || !canShrinkWidth}
           onClick={(event) => {
             event.stopPropagation();
             onResize("w", -1);
@@ -557,7 +563,7 @@ function DashboardBuilderWidgetCard({
         <button
           aria-label="Increase width"
           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!canGrowWidth}
+          disabled={disabled || !canGrowWidth}
           onClick={(event) => {
             event.stopPropagation();
             onResize("w", 1);
@@ -569,7 +575,7 @@ function DashboardBuilderWidgetCard({
         <button
           aria-label="Decrease height"
           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!canShrinkHeight}
+          disabled={disabled || !canShrinkHeight}
           onClick={(event) => {
             event.stopPropagation();
             onResize("h", -1);
@@ -581,7 +587,7 @@ function DashboardBuilderWidgetCard({
         <button
           aria-label="Increase height"
           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={!canGrowHeight}
+          disabled={disabled || !canGrowHeight}
           onClick={(event) => {
             event.stopPropagation();
             onResize("h", 1);
@@ -591,6 +597,19 @@ function DashboardBuilderWidgetCard({
           <ArrowUp className="h-4 w-4 rotate-90" />
         </button>
       </div>
+      <button
+        aria-label={`Delete ${widget.title}`}
+        className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 text-sm font-medium text-rose-700 transition hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={disabled}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+        type="button"
+      >
+        <Trash2 className="h-4 w-4" />
+        Remove
+      </button>
     </div>
   );
 
@@ -977,7 +996,9 @@ async function saveConfig(config: DashboardBuilderConfig) {
 
 function BuilderCanvas({
   data,
+  disabled,
   onAddWidget,
+  onDeleteWidget,
   onMoveWidget,
   onResizeWidget,
   onSelectWidget,
@@ -986,7 +1007,9 @@ function BuilderCanvas({
   tab
 }: {
   data: DashboardData;
+  disabled: boolean;
   onAddWidget: () => void;
+  onDeleteWidget: (widgetId: string) => void;
   onMoveWidget: (widgetId: string, direction: LayoutDirection) => void;
   onResizeWidget: (widgetId: string, dimension: LayoutDimension, delta: number) => void;
   onSelectWidget: (widgetId: string) => void;
@@ -1009,6 +1032,7 @@ function BuilderCanvas({
           </div>
           <button
             className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-border bg-background px-4 text-sm font-medium transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            disabled={disabled}
             onClick={onAddWidget}
             type="button"
           >
@@ -1046,6 +1070,7 @@ function BuilderCanvas({
           </p>
           <button
             className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-border bg-background px-4 text-sm font-medium transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            disabled={disabled}
             onClick={onAddWidget}
             type="button"
           >
@@ -1072,7 +1097,9 @@ function BuilderCanvas({
             >
               <DashboardBuilderWidgetCard
                 data={data}
+                disabled={disabled}
                 isSelected={widget.id === selectedWidgetId}
+                onDelete={() => onDeleteWidget(widget.id)}
                 onMove={(direction) => onMoveWidget(widget.id, direction)}
                 onResize={(dimension, delta) => onResizeWidget(widget.id, dimension, delta)}
                 onSelect={() => onSelectWidget(widget.id)}
@@ -1223,6 +1250,23 @@ export function DashboardBuilderShell({
     updateActiveTabWidgets((widgets) => [...widgets, nextWidget], nextWidgetId);
   }
 
+  function handleDeleteWidget(widgetId: string) {
+    if (!activeTab) {
+      return;
+    }
+
+    const widgetIndex = activeTab.widgets.findIndex((widget) => widget.id === widgetId);
+    if (widgetIndex === -1) {
+      return;
+    }
+
+    const remainingWidgets = activeTab.widgets.filter((widget) => widget.id !== widgetId);
+    const nextSelectedWidgetId =
+      remainingWidgets[widgetIndex]?.id ?? remainingWidgets[widgetIndex - 1]?.id ?? remainingWidgets[0]?.id ?? "";
+
+    updateActiveTabWidgets((widgets) => widgets.filter((widget) => widget.id !== widgetId), nextSelectedWidgetId);
+  }
+
   function handleMoveWidget(widgetId: string, direction: LayoutDirection) {
     updateActiveTabWidgets(
       (widgets) =>
@@ -1345,7 +1389,9 @@ export function DashboardBuilderShell({
           <CardContent>
             <BuilderCanvas
               data={initialDashboardData}
+              disabled={isPending}
               onAddWidget={handleAddWidget}
+              onDeleteWidget={handleDeleteWidget}
               onMoveWidget={handleMoveWidget}
               onResizeWidget={handleResizeWidget}
               onSelectWidget={setSelectedWidgetId}
@@ -1360,6 +1406,7 @@ export function DashboardBuilderShell({
           disabled={isPending}
           onAddWidget={handleAddWidget}
           onChangeWidgetType={handleChangeWidgetType}
+          onDeleteWidget={handleDeleteWidget}
           onMoveWidget={handleMoveWidget}
           onResizeWidget={handleResizeWidget}
           onSelectWidget={setSelectedWidgetId}
