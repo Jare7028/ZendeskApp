@@ -171,8 +171,28 @@ function createAccumulator(): Accumulator {
   };
 }
 
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sortJsonValue(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as JsonObject)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nestedValue]) => [key, sortJsonValue(nestedValue)])
+    );
+  }
+
+  return value;
+}
+
+function normalizeMetricDimension(dimension: MetricDimension): MetricDimension {
+  return sortJsonValue(dimension) as MetricDimension;
+}
+
 function accumulatorKey(clientId: string, metricDate: string, dimension: MetricDimension) {
-  return `${clientId}:${metricDate}:${JSON.stringify(dimension)}`;
+  return `${clientId}:${metricDate}:${JSON.stringify(normalizeMetricDimension(dimension))}`;
 }
 
 function getAccumulator(
@@ -279,17 +299,18 @@ function pushTicketMetrics(accumulator: Accumulator, metric: TicketMetricRow | n
 function finalizeRows(
   store: Map<string, { clientId: string; metricDate: string; dimension: MetricDimension; value: Accumulator }>
 ) {
-  const rows: Array<{
+  const rowsByKey = new Map<string, {
     client_id: string;
     metric_date: string;
     metric_key: string;
     dimension: MetricDimension;
     metric_value: number;
     computed_at: string;
-  }> = [];
+  }>();
   const computedAt = new Date().toISOString();
 
   for (const entry of store.values()) {
+    const dimension = normalizeMetricDimension(entry.dimension);
     const hoursWorked = entry.value.totalMinutesWorked / 60;
     const activityHours = entry.value.activeMinutesWorked / 60;
     const activeAgentCount = entry.value.activeAgentIds.size;
@@ -333,18 +354,26 @@ function finalizeRows(
         continue;
       }
 
-      rows.push({
+      const row = {
         client_id: entry.clientId,
         metric_date: entry.metricDate,
         metric_key: metricKey,
-        dimension: entry.dimension,
+        dimension,
         metric_value: Number(metricValue.toFixed(4)),
         computed_at: computedAt
-      });
+      };
+      const rowKey = [
+        row.client_id,
+        row.metric_date,
+        row.metric_key,
+        JSON.stringify(row.dimension)
+      ].join("|");
+
+      rowsByKey.set(rowKey, row);
     }
   }
 
-  return rows;
+  return [...rowsByKey.values()];
 }
 
 async function insertComputedMetricRows(
@@ -365,7 +394,9 @@ async function insertComputedMetricRows(
 
   for (let index = 0; index < rows.length; index += METRIC_BATCH_SIZE) {
     const batch = rows.slice(index, index + METRIC_BATCH_SIZE);
-    const { error } = await supabase.from("computed_metrics").insert(batch);
+    const { error } = await supabase
+      .from("computed_metrics")
+      .upsert(batch, { onConflict: "client_id,metric_date,metric_key,dimension" });
 
     if (error) {
       throw error;
