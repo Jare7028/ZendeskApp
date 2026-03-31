@@ -10,9 +10,7 @@ import { readSlaConfig } from "@/lib/sla/config";
 import { getConnecteamAdminOverview } from "@/lib/connecteam/status";
 import { getStatusToneClassName } from "@/lib/sync-status";
 import { getZendeskConnectionStatus } from "@/lib/zendesk/status";
-import { saveAgentMappingOverrideAction } from "./actions";
-
-const IGNORE_MAPPING_VALUE = "__ignore__";
+import { AgentMappingReview } from "./agent-mapping-review";
 
 function formatDateTime(value: string | null) {
   if (!value) {
@@ -409,9 +407,9 @@ export default async function AdminPage({
                   </div>
                   <div>
                     <p className="font-medium text-foreground">Mappings</p>
-                    <p>Mapped {connection.mappingSummary.mapped}</p>
-                    <p className="text-xs">Ignored {connection.mappingSummary.ignored}</p>
-                    <p className="text-xs">Unmapped {connection.mappingSummary.unmapped}</p>
+                    <p>Needs action {connection.mappingReviewSummary.needsAction}</p>
+                    <p className="text-xs">Ignored {connection.mappingReviewSummary.ignored}</p>
+                    <p className="text-xs">Mapped {connection.mappingReviewSummary.mapped}</p>
                   </div>
                   <div>
                     <p className="font-medium text-foreground">Scheduler assignments</p>
@@ -434,102 +432,7 @@ export default async function AdminPage({
                   </form>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="space-y-1">
-                    <h2 className="text-lg font-semibold text-foreground">Agent identity mapping</h2>
-                    <p className="text-sm text-muted-foreground">
-                      Auto-match uses Zendesk agent email against Connecteam user email for this client. Only mapped
-                      agents are included in staffing metrics; ignored and unmapped agents stay excluded.
-                    </p>
-                  </div>
-
-                  {connection.assignmentRows.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-                      No scheduler assignments exist for this Connecteam connection yet.
-                    </div>
-                  ) : null}
-
-                  <div className="space-y-3">
-                    {connection.assignmentRows.map((assignment) => (
-                      <div className="space-y-3 rounded-[24px] border border-border px-4 py-4" key={assignment.id}>
-                        <div className="space-y-1">
-                          <p className="text-base font-semibold text-foreground">
-                            {assignment.client?.name ?? "Unknown client"} · {assignment.zendeskConnection?.name ?? "Unknown Zendesk connection"}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            Scheduler {assignment.scheduler_name ?? assignment.scheduler_id}
-                          </p>
-                        </div>
-
-                        {assignment.zendeskAgents.length === 0 ? (
-                          <div className="rounded-2xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-                            No Zendesk agents have been synced for this assignment yet.
-                          </div>
-                        ) : null}
-
-                        {assignment.zendeskAgents.map((agent) => (
-                          <form
-                            action={saveAgentMappingOverrideAction}
-                            className="grid gap-3 rounded-2xl border border-border px-4 py-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.2fr)_220px_auto]"
-                            key={`${connection.id}:${agent.zendeskConnectionId}:${agent.zendeskAgentId}`}
-                          >
-                            <input type="hidden" name="clientId" value={assignment.client_id} />
-                            <input type="hidden" name="zendeskConnectionId" value={agent.zendeskConnectionId} />
-                            <input type="hidden" name="connecteamConnectionId" value={connection.id} />
-                            <input type="hidden" name="zendeskAgentId" value={agent.zendeskAgentId} />
-
-                            <div className="space-y-1 text-sm">
-                              <p className="font-medium text-foreground">{agent.zendeskName ?? agent.email ?? agent.zendeskAgentId}</p>
-                              <p className="text-muted-foreground">{agent.email ?? "No email on Zendesk agent"}</p>
-                            </div>
-
-                            <div className="space-y-1 text-sm">
-                              <p className="font-medium text-foreground">
-                                {agent.mapping?.connecteam_user_name ?? "No Connecteam user selected"}
-                              </p>
-                              <p className="text-muted-foreground">
-                                {agent.mapping?.connecteam_user_id ?? "No current Connecteam mapping"}
-                              </p>
-                            </div>
-
-                            <div className="space-y-2">
-                              <select
-                                className="flex h-11 w-full rounded-2xl border border-input bg-background px-4 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
-                                defaultValue={
-                                  agent.mapping?.inclusion_status === "ignored"
-                                    ? IGNORE_MAPPING_VALUE
-                                    : agent.mapping?.connecteam_user_id ?? ""
-                                }
-                                name="connecteamUserId"
-                              >
-                                <option value="">Unmapped (exclude by default)</option>
-                                <option value={IGNORE_MAPPING_VALUE}>Ignore intentionally</option>
-                                {assignment.users.map((user) => (
-                                  <option key={user.connecteam_user_id} value={user.connecteam_user_id}>
-                                    {user.full_name ?? user.email ?? user.connecteam_user_id}
-                                    {user.email ? ` (${user.email})` : ""}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div className="flex items-center gap-3">
-                              <Badge className={badgeClassName(agent.mapping?.inclusion_status ?? "unmapped")}>
-                                {agent.mapping?.inclusion_status ?? "unmapped"}
-                              </Badge>
-                              <Badge className={badgeClassName(agent.mapping?.match_source ?? "unmatched")}>
-                                {agent.mapping?.match_source ?? "unmatched"}
-                              </Badge>
-                              <Button type="submit" variant="outline">
-                                Save override
-                              </Button>
-                            </div>
-                          </form>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <AgentMappingReview connection={connection} />
               </CardContent>
             </Card>
           );

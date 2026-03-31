@@ -53,6 +53,27 @@ type MappingRow = {
   manual_override: boolean;
 };
 
+type AssignmentAgentRow = {
+  zendeskConnectionId: string;
+  zendeskAgentId: string;
+  zendeskName: string | null;
+  email: string | null;
+  mapping: MappingRow | null;
+  suggestedUser: ConnecteamUserRow | null;
+  reviewBucket: "needs_action" | "ignored" | "mapped";
+  reviewReason: string;
+  hasProblem: boolean;
+};
+
+type MappingReviewStats = {
+  total: number;
+  mapped: number;
+  ignored: number;
+  unmapped: number;
+  needsAction: number;
+  problems: number;
+};
+
 type ZendeskAgentRow = {
   client_id: string;
   zendesk_connection_id: string;
@@ -95,6 +116,47 @@ type ZendeskConnectionRow = {
 function normalizeEmail(value: string | null) {
   const trimmed = value?.trim().toLowerCase();
   return trimmed ? trimmed : null;
+}
+
+function emptyMappingReviewStats(): MappingReviewStats {
+  return {
+    total: 0,
+    mapped: 0,
+    ignored: 0,
+    unmapped: 0,
+    needsAction: 0,
+    problems: 0
+  };
+}
+
+function summarizeAssignmentAgents(agents: AssignmentAgentRow[]) {
+  const summary = emptyMappingReviewStats();
+
+  for (const agent of agents) {
+    summary.total += 1;
+
+    if (agent.mapping?.inclusion_status === "mapped") {
+      summary.mapped += 1;
+    }
+
+    if (agent.mapping?.inclusion_status === "ignored") {
+      summary.ignored += 1;
+    }
+
+    if (!agent.mapping || agent.mapping.inclusion_status === "unmapped") {
+      summary.unmapped += 1;
+    }
+
+    if (agent.reviewBucket === "needs_action") {
+      summary.needsAction += 1;
+    }
+
+    if (agent.hasProblem) {
+      summary.problems += 1;
+    }
+  }
+
+  return summary;
 }
 
 export async function getConnecteamConnectionStatus() {
@@ -307,25 +369,79 @@ export async function getConnecteamAdminOverview() {
   return connections.map((connection) => {
     const connectionUsers = usersByConnection.get(connection.id) ?? [];
     const mappingRows = mappingsByConnection.get(connection.id) ?? [];
+    const userById = new Map(connectionUsers.map((user) => [user.connecteam_user_id, user]));
+    const usersByEmail = new Map<string, ConnecteamUserRow[]>();
+
+    for (const user of connectionUsers) {
+      const email = normalizeEmail(user.email);
+      if (!email) {
+        continue;
+      }
+
+      const list = usersByEmail.get(email) ?? [];
+      list.push(user);
+      usersByEmail.set(email, list);
+    }
+
     const assignmentRows = connection.schedulerAssignments.map((assignment) => {
       const agentRows = zendeskAgents
         .filter(
           (agent) =>
             agent.client_id === assignment.client_id && agent.zendesk_connection_id === assignment.zendesk_connection_id
         )
-        .map((agent) => ({
-          zendeskConnectionId: agent.zendesk_connection_id,
-          zendeskAgentId: agent.zendesk_user_id,
-          zendeskName: agent.name,
-          email: normalizeEmail(agent.email),
-          mapping:
+        .map((agent) => {
+          const email = normalizeEmail(agent.email);
+          const mapping =
             mappingByZendeskKey.get(
               `${connection.id}:${agent.zendesk_connection_id}:${agent.zendesk_user_id}`
-            ) ?? null
-        }))
+            ) ?? null;
+          const mappedUser =
+            mapping?.connecteam_user_id ? userById.get(mapping.connecteam_user_id) ?? null : null;
+          const emailMatches = email ? usersByEmail.get(email) ?? [] : [];
+          const suggestedUser = !mappedUser && emailMatches.length === 1 ? emailMatches[0] : null;
+
+          let reviewBucket: AssignmentAgentRow["reviewBucket"] = "needs_action";
+          let reviewReason = "No Connecteam match yet.";
+          let hasProblem = false;
+
+          if (mapping?.inclusion_status === "ignored") {
+            reviewBucket = "ignored";
+            reviewReason = "Ignored intentionally and excluded from staffing metrics.";
+          } else if (mapping?.inclusion_status === "mapped" && mappedUser) {
+            reviewBucket = "mapped";
+            reviewReason =
+              mapping.match_source === "auto"
+                ? "Mapped automatically and included in staffing metrics."
+                : "Mapped manually and included in staffing metrics.";
+          } else if (mapping?.inclusion_status === "mapped" && !mappedUser) {
+            reviewReason = "Mapped user is no longer present in the current Connecteam sync.";
+            hasProblem = true;
+          } else if (!email) {
+            reviewReason = "Zendesk agent has no email, so auto-match cannot assist triage.";
+            hasProblem = true;
+          } else if (emailMatches.length > 1) {
+            reviewReason = "Multiple Connecteam users share this email. Review manually.";
+            hasProblem = true;
+          } else if (suggestedUser) {
+            reviewReason = "Exact email match available. Review and save in bulk.";
+          }
+
+          return {
+            zendeskConnectionId: agent.zendesk_connection_id,
+            zendeskAgentId: agent.zendesk_user_id,
+            zendeskName: agent.name,
+            email,
+            mapping,
+            suggestedUser,
+            reviewBucket,
+            reviewReason,
+            hasProblem
+          };
+        })
         .sort((left, right) =>
           (left.zendeskName ?? left.email ?? "").localeCompare(right.zendeskName ?? right.email ?? "")
         );
+      const reviewSummary = summarizeAssignmentAgents(agentRows);
 
       return {
         ...assignment,
@@ -334,15 +450,31 @@ export async function getConnecteamAdminOverview() {
             right.full_name ?? right.email ?? right.connecteam_user_id
           )
         ),
-        zendeskAgents: agentRows
+        zendeskAgents: agentRows,
+        reviewSummary,
+        reviewGroups: {
+          needsAction: agentRows.filter((agent) => agent.reviewBucket === "needs_action"),
+          ignored: agentRows.filter((agent) => agent.reviewBucket === "ignored"),
+          mapped: agentRows.filter((agent) => agent.reviewBucket === "mapped")
+        }
       };
     });
+    const mappingReviewSummary = assignmentRows.reduce((summary, assignment) => {
+      summary.total += assignment.reviewSummary.total;
+      summary.mapped += assignment.reviewSummary.mapped;
+      summary.ignored += assignment.reviewSummary.ignored;
+      summary.unmapped += assignment.reviewSummary.unmapped;
+      summary.needsAction += assignment.reviewSummary.needsAction;
+      summary.problems += assignment.reviewSummary.problems;
+      return summary;
+    }, emptyMappingReviewStats());
 
     return {
       ...connection,
       users: connectionUsers,
       mappings: mappingRows,
       assignmentRows,
+      mappingReviewSummary,
       mappingSummary: {
         mapped: mappingRows.filter((row) => row.inclusion_status === "mapped").length,
         ignored: mappingRows.filter((row) => row.inclusion_status === "ignored").length,
