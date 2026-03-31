@@ -138,8 +138,9 @@ export default async function DashboardPage({
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Portfolio overview</p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight">Operational analytics for the current window</h2>
               <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-                Ticket volume, reply workload, service levels, and staffing signals are separated so the dashboard does
-                not blur ticket counts into contact throughput.
+                Ticket-created volume, reply workload, service levels, and matched staffing hours are separated so the
+                dashboard does not blur ticket counts into reply throughput. Reply and service metrics are still rolled
+                against tickets created inside the selected window.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-3">
@@ -154,34 +155,34 @@ export default async function DashboardPage({
           {context.role === "admin" ? <SlaAlertFeed alerts={dashboard.alerts} /> : null}
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
             <MetricCard
-              title="Reply contacts per hour"
+              title="Reply workload per hour"
               value={formatNumber(dashboard.overview.repliesPerHourWorked, 2)}
-              description="Zendesk replies divided by matched Connecteam hours. This is the contact throughput KPI."
+              description="Zendesk reply count from ticket metrics divided by matched Connecteam hours for tickets created in-range."
             />
             <MetricCard
-              title="Tickets per hour worked"
+              title="Ticket intake per hour"
               value={formatNumber(dashboard.overview.interactionsPerHourWorked, 2)}
-              description="Ticket volume divided by matched hours. Useful for intake load, not direct contact throughput."
+              description="Tickets created in the selected window divided by matched hours. Use this for intake load, not reply throughput."
             />
             <MetricCard
-              title="Total tickets"
+              title="Tickets created"
               value={formatNumber(dashboard.overview.totalInteractions, 0)}
-              description="Zendesk tickets handled inside the selected date window after client and agent filters."
+              description="Zendesk tickets created inside the selected date window after client and agent filters."
             />
             <MetricCard
-              title="Total replies"
+              title="Replies on those tickets"
               value={formatNumber(dashboard.overview.totalReplies, 0)}
-              description="Reply events captured from the synced Zendesk ticket metrics payload."
+              description="Reply events captured from the synced Zendesk ticket metrics payload for the same in-range ticket set."
             />
             <MetricCard
-              title="Agent utilisation"
+              title="Active-day utilisation"
               value={formatPercent(dashboard.overview.agentUtilisationRatio)}
-              description="Scheduled hours on days with ticket activity divided by total scheduled hours."
+              description="Matched hours on days with at least one attributed in-range ticket divided by all matched hours."
             />
             <MetricCard
               title="Replies per ticket"
               value={formatNumber(dashboard.overview.repliesPerTicket, 2)}
-              description="Average Zendesk replies captured in the synced ticket metric payload."
+              description="Average Zendesk replies captured in ticket metrics for tickets created in the selected window."
             />
           </section>
 
@@ -194,12 +195,12 @@ export default async function DashboardPage({
                   primary: point.interactions,
                   secondary: point.hoursWorked
                 }))}
-                description="Hover the chart to inspect how ticket volume and staffed hours moved together across the selected periods."
+                description="Hover the chart to inspect how tickets created and staffed hours moved together across the selected periods."
                 primaryColor="#0f766e"
-                primaryLabel="Tickets"
+                primaryLabel="Tickets created"
                 secondaryColor="#d97706"
                 secondaryLabel="Hours worked"
-                title="Ticket load vs staffed hours"
+                title="Ticket intake vs staffed hours"
               />
               <Card className="border-border/60 bg-card/95">
                 <CardHeader>
@@ -217,7 +218,7 @@ export default async function DashboardPage({
                   <div className="rounded-2xl bg-muted/40 p-4">
                     <p className="text-xs uppercase tracking-[0.16em]">Now separated</p>
                     <p className="mt-2 text-foreground">
-                      `Reply contacts/hour` uses reply count. `Tickets/hour` remains available as intake load.
+                      `Reply workload/hour` uses reply count. `Tickets/hour` remains available as intake load.
                     </p>
                   </div>
                   <div className="rounded-2xl bg-muted/40 p-4">
@@ -233,7 +234,7 @@ export default async function DashboardPage({
 
             <ChannelStackedCard
               data={dashboard.trends.channel}
-              description="Daily interaction mix by channel. Email, chat, phone, and remaining sources are broken out."
+              description="Daily ticket-created mix by channel. Email, chat, phone, and remaining sources are broken out."
               title="Channel mix over time"
             />
             </>
@@ -305,8 +306,8 @@ export default async function DashboardPage({
                   <CardTitle>{formatPercent(dashboard.overview.agentUtilisationRatio)}</CardTitle>
                 </CardHeader>
                 <CardContent className="text-sm text-muted-foreground">
-                  Activity-day hours divided by total logged hours. High numbers mean the team is spending more of its
-                  scheduled time on days with ticket demand.
+                  Hours on days with at least one attributed in-range ticket divided by total matched hours. High
+                  numbers mean the team is spending more of its scheduled time on days with ticket demand.
                 </CardContent>
               </Card>
               <Card className="border-border/60 bg-card/95">
@@ -325,7 +326,7 @@ export default async function DashboardPage({
                   <CardTitle>{formatNumber(dashboard.overview.reopensPerAgent, 2)}</CardTitle>
                 </CardHeader>
                 <CardContent className="text-sm text-muted-foreground">
-                  Reopens normalised by agents with activity in the current scope.
+                  Reopens normalised by agents with at least one attributed ticket in the current scope.
                 </CardContent>
               </Card>
             </section>

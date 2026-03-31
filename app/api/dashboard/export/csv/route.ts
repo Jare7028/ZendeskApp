@@ -51,9 +51,9 @@ export async function GET(request: NextRequest) {
       "agentName",
       "clientId",
       "clientName",
-      "totalInteractions",
+      "ticketsCreated",
       "totalHoursWorked",
-      "interactionsPerHourWorked",
+      "ticketIntakePerHourWorked",
       "avgFirstReplyMinutes",
       "avgFullResolutionMinutes",
       "totalReopens",
@@ -65,9 +65,9 @@ export async function GET(request: NextRequest) {
       agentName: row.agentName,
       clientId: row.clientId,
       clientName: row.clientName,
-      totalInteractions: row.totalInteractions,
+      ticketsCreated: row.totalInteractions,
       totalHoursWorked: row.totalHoursWorked,
-      interactionsPerHourWorked: row.interactionsPerHourWorked,
+      ticketIntakePerHourWorked: row.interactionsPerHourWorked,
       avgFirstReplyMinutes: row.avgFirstReplyMinutes,
       avgFullResolutionMinutes: row.avgFullResolutionMinutes,
       totalReopens: row.totalReopens,
@@ -87,9 +87,9 @@ export async function GET(request: NextRequest) {
     const columns = [
       "clientId",
       "clientName",
-      "totalInteractions",
+      "ticketsCreated",
       "totalHoursWorked",
-      "interactionsPerHourWorked",
+      "ticketIntakePerHourWorked",
       "avgFirstReplyMinutes",
       "avgFullResolutionMinutes",
       "utilisation",
@@ -129,33 +129,33 @@ export async function GET(request: NextRequest) {
       "clientId",
       "clientName",
       "rank",
-      "totalInteractions",
+      "ticketsCreated",
       "totalHoursWorked",
-      "interactionsPerHourWorked",
+      "ticketIntakePerHourWorked",
       "avgFirstReplyMinutes",
       "avgFullResolutionMinutes",
       "totalReopens",
       "utilisation"
     ];
     const rows: Array<Record<string, string | number | null | undefined>> = [
-      { rowType: "summary", label: "totalTickets", value: detail.overview.totalInteractions, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
+      { rowType: "summary", label: "ticketsCreated", value: detail.overview.totalInteractions, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
       { rowType: "summary", label: "repliesPerHourWorked", value: detail.overview.repliesPerHourWorked, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
-      { rowType: "summary", label: "ticketsPerHourWorked", value: detail.overview.interactionsPerHourWorked, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
+      { rowType: "summary", label: "ticketIntakePerHourWorked", value: detail.overview.interactionsPerHourWorked, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
       { rowType: "summary", label: "avgFirstReplyMinutes", value: detail.overview.avgFirstReplyMinutes, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
       { rowType: "summary", label: "avgFullResolutionMinutes", value: detail.overview.avgFullResolutionMinutes, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName },
-      { rowType: "summary", label: "utilisation", value: detail.overview.agentUtilisationRatio, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName }
+      { rowType: "summary", label: "activeDayUtilisation", value: detail.overview.agentUtilisationRatio, agentId: detail.agent.id, agentName: detail.agent.name, clientId: detail.agent.clientId, clientName: detail.agent.clientName }
     ];
 
     for (const point of detail.trends.volume) {
       rows.push({
         rowType: "trend",
         date: point.date,
-        label: "volume",
+        label: "ticketCreationVolume",
         agentId: detail.agent.id,
         agentName: detail.agent.name,
         clientId: detail.agent.clientId,
         clientName: detail.agent.clientName,
-        totalInteractions: point.interactions,
+        ticketsCreated: point.interactions,
         totalHoursWorked: point.hoursWorked
       });
     }
@@ -182,9 +182,9 @@ export async function GET(request: NextRequest) {
         agentName: row.agentName,
         clientId: row.clientId,
         clientName: row.clientName,
-        totalInteractions: row.totalInteractions,
+        ticketsCreated: row.totalInteractions,
         totalHoursWorked: row.totalHoursWorked,
-        interactionsPerHourWorked: row.interactionsPerHourWorked,
+        ticketIntakePerHourWorked: row.interactionsPerHourWorked,
         avgFirstReplyMinutes: row.avgFirstReplyMinutes,
         avgFullResolutionMinutes: row.avgFullResolutionMinutes,
         totalReopens: row.totalReopens,
@@ -223,31 +223,31 @@ export async function GET(request: NextRequest) {
       "agentId",
       "agentName",
       "rank",
-      "totalInteractions",
+      "ticketsCreated",
       "totalHoursWorked",
-      "interactionsPerHourWorked",
+      "ticketIntakePerHourWorked",
       "avgFirstReplyMinutes",
       "avgFullResolutionMinutes",
       "totalReopens",
       "utilisation"
     ];
     const rows: Array<Record<string, string | number | null | undefined>> = [
-      { rowType: "summary", label: "totalTickets", value: detail.overview.totalInteractions, clientId: detail.client.id, clientName: detail.client.name },
+      { rowType: "summary", label: "ticketsCreated", value: detail.overview.totalInteractions, clientId: detail.client.id, clientName: detail.client.name },
       { rowType: "summary", label: "repliesPerHourWorked", value: detail.overview.repliesPerHourWorked, clientId: detail.client.id, clientName: detail.client.name },
-      { rowType: "summary", label: "ticketsPerHourWorked", value: detail.overview.interactionsPerHourWorked, clientId: detail.client.id, clientName: detail.client.name },
+      { rowType: "summary", label: "ticketIntakePerHourWorked", value: detail.overview.interactionsPerHourWorked, clientId: detail.client.id, clientName: detail.client.name },
       { rowType: "summary", label: "avgFirstReplyMinutes", value: detail.overview.avgFirstReplyMinutes, clientId: detail.client.id, clientName: detail.client.name },
       { rowType: "summary", label: "avgFullResolutionMinutes", value: detail.overview.avgFullResolutionMinutes, clientId: detail.client.id, clientName: detail.client.name },
-      { rowType: "summary", label: "utilisation", value: detail.overview.agentUtilisationRatio, clientId: detail.client.id, clientName: detail.client.name }
+      { rowType: "summary", label: "activeDayUtilisation", value: detail.overview.agentUtilisationRatio, clientId: detail.client.id, clientName: detail.client.name }
     ];
 
     for (const point of detail.trends.volume) {
       rows.push({
         rowType: "trend",
         date: point.date,
-        label: "volume",
+        label: "ticketCreationVolume",
         clientId: detail.client.id,
         clientName: detail.client.name,
-        totalInteractions: point.interactions,
+        ticketsCreated: point.interactions,
         totalHoursWorked: point.hoursWorked
       });
     }
@@ -272,9 +272,9 @@ export async function GET(request: NextRequest) {
         agentName: row.agentName,
         clientId: row.clientId,
         clientName: row.clientName,
-        totalInteractions: row.totalInteractions,
+        ticketsCreated: row.totalInteractions,
         totalHoursWorked: row.totalHoursWorked,
-        interactionsPerHourWorked: row.interactionsPerHourWorked,
+        ticketIntakePerHourWorked: row.interactionsPerHourWorked,
         avgFirstReplyMinutes: row.avgFirstReplyMinutes,
         avgFullResolutionMinutes: row.avgFullResolutionMinutes,
         totalReopens: row.totalReopens,
@@ -291,12 +291,12 @@ export async function GET(request: NextRequest) {
   }
 
   const dashboard = await getDashboardData(searchParams);
-  const columns = ["section", "label", "value", "date", "interactions", "hoursWorked", "avgFirstReplyMinutes", "avgFullResolutionMinutes"];
+  const columns = ["section", "label", "value", "date", "ticketsCreated", "hoursWorked", "avgFirstReplyMinutes", "avgFullResolutionMinutes"];
   const rows: Array<Record<string, string | number | null | undefined>> = [
-    { section: "overview", label: "totalTickets", value: dashboard.overview.totalInteractions },
-    { section: "overview", label: "totalReplies", value: dashboard.overview.totalReplies },
+    { section: "overview", label: "ticketsCreated", value: dashboard.overview.totalInteractions },
+    { section: "overview", label: "repliesOnThoseTickets", value: dashboard.overview.totalReplies },
     { section: "overview", label: "repliesPerHourWorked", value: dashboard.overview.repliesPerHourWorked },
-    { section: "overview", label: "ticketsPerHourWorked", value: dashboard.overview.interactionsPerHourWorked },
+    { section: "overview", label: "ticketIntakePerHourWorked", value: dashboard.overview.interactionsPerHourWorked },
     { section: "overview", label: "avgFirstReplyMinutes", value: dashboard.overview.avgFirstReplyMinutes },
     { section: "overview", label: "avgFullResolutionMinutes", value: dashboard.overview.avgFullResolutionMinutes },
     { section: "overview", label: "requesterWaitTimeMinutes", value: dashboard.overview.requesterWaitTimeMinutes }
@@ -306,7 +306,7 @@ export async function GET(request: NextRequest) {
     rows.push({
       section: "volumeTrend",
       date: point.date,
-      interactions: point.interactions,
+      ticketsCreated: point.interactions,
       hoursWorked: point.hoursWorked
     });
   }

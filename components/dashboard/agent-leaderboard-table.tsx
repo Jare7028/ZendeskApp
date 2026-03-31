@@ -97,7 +97,8 @@ export function AgentLeaderboardTable({
         <div className="space-y-2">
           <CardTitle>{selectedAgentName ? `${selectedAgentName} leaderboard snapshot` : "Agent leaderboard"}</CardTitle>
           <CardDescription>
-            Ranked agent performance for the selected window. Ticket volume and ticket-per-hour are shown separately from reply workload.
+            Ranked agent performance for tickets created in the selected window. Ticket intake and ticket-per-hour are
+            shown separately from reply workload.
           </CardDescription>
         </div>
         <ExportControls csvHref={csvHref} pdfHref={pdfHref} />
@@ -132,7 +133,7 @@ export function AgentLeaderboardTable({
                     <SortLink
                       activeKey={sort.key}
                       direction={sort.direction}
-                        label="Tkt/hr"
+                        label="Tickets/hr"
                       params={params}
                       sortKey="interactionsPerHourWorked"
                     />

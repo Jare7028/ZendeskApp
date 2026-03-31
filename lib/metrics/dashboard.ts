@@ -70,6 +70,13 @@ type TicketRow = {
   client_id: string;
   zendesk_connection_id: string;
   agent_mapping_id: string | null;
+  raw_payload: JsonObject | null;
+};
+
+type AgentMappingLookupRow = {
+  id: string;
+  client_id: string;
+  zendesk_agent_id: string | null;
 };
 
 type TicketMetricRow = {
@@ -549,18 +556,12 @@ async function getServiceMetricWindowRows(options: {
   }
 
   const supabase = createServerSupabaseClient().schema("app");
-  let ticketsQuery = supabase
+  const { data: tickets, error: ticketsError } = await supabase
     .from("tickets")
-    .select("id,client_id,zendesk_connection_id,agent_mapping_id")
+    .select("id,client_id,zendesk_connection_id,agent_mapping_id,raw_payload")
     .in("client_id", options.clientIds)
     .gte("created_at_source", `${options.startDate}T00:00:00.000Z`)
     .lte("created_at_source", `${options.endDate}T23:59:59.999Z`);
-
-  if (options.agentMappingId) {
-    ticketsQuery = ticketsQuery.eq("agent_mapping_id", options.agentMappingId);
-  }
-
-  const { data: tickets, error: ticketsError } = await ticketsQuery;
 
   if (ticketsError) {
     throw ticketsError;
@@ -571,6 +572,24 @@ async function getServiceMetricWindowRows(options: {
   if (typedTickets.length === 0) {
     return [];
   }
+
+  const { data: agentMappings, error: agentMappingsError } = await supabase
+    .from("agent_mappings")
+    .select("id,client_id,zendesk_agent_id")
+    .in("client_id", options.clientIds)
+    .eq("inclusion_status", "mapped")
+    .not("zendesk_agent_id", "is", null);
+
+  if (agentMappingsError) {
+    throw agentMappingsError;
+  }
+
+  const agentMappingByClientAndZendeskAgentId = new Map(
+    ((agentMappings ?? []) as AgentMappingLookupRow[]).map((mapping) => [
+      `${mapping.client_id}:${mapping.zendesk_agent_id}`,
+      mapping.id
+    ])
+  );
 
   const ticketMetricRows: TicketMetricRow[] = [];
   const ticketIds = typedTickets.map((ticket) => ticket.id);
@@ -603,13 +622,33 @@ async function getServiceMetricWindowRows(options: {
         ticketId: row.ticket_id,
         clientId: ticket.client_id,
         zendeskConnectionId: ticket.zendesk_connection_id,
-        agentMappingId: ticket.agent_mapping_id,
+        agentMappingId:
+          ticket.agent_mapping_id ??
+          (() => {
+            const assigneeId = ticket.raw_payload?.assignee_id;
+
+            if (assigneeId === null || assigneeId === undefined) {
+              return null;
+            }
+
+            return agentMappingByClientAndZendeskAgentId.get(`${ticket.client_id}:${String(assigneeId)}`) ?? null;
+          })(),
         firstResponseMinutes: row.first_response_minutes,
         fullResolutionMinutes: row.full_resolution_minutes,
         payload: row.payload
       } satisfies ServiceMetricWindowRow;
     })
-    .filter((row): row is ServiceMetricWindowRow => row !== null);
+    .filter((row): row is ServiceMetricWindowRow => {
+      if (!row) {
+        return false;
+      }
+
+      if (options.agentMappingId) {
+        return row.agentMappingId === options.agentMappingId;
+      }
+
+      return true;
+    });
 }
 
 function buildEmptySlaMetric(status: SlaStatusTone = "unconfigured"): SlaMetricCompliance {
@@ -1223,7 +1262,7 @@ function buildCapacityStatus(
     return {
       capacityLabel: "Understaffed",
       capacityTone: "critical",
-      capacityDetail: "High utilisation and above-median ticket load suggest stretched coverage."
+      capacityDetail: "High utilisation and above-median ticket-created load suggest stretched coverage."
     } satisfies Pick<ClientComparisonRow, "capacityLabel" | "capacityTone" | "capacityDetail">;
   }
 
@@ -1231,7 +1270,7 @@ function buildCapacityStatus(
     return {
       capacityLabel: "Overstaffed",
       capacityTone: "warning",
-      capacityDetail: "Hours are outpacing ticket demand relative to the rest of the portfolio."
+      capacityDetail: "Hours are outpacing ticket-created demand relative to the rest of the portfolio."
     } satisfies Pick<ClientComparisonRow, "capacityLabel" | "capacityTone" | "capacityDetail">;
   }
 
@@ -1246,7 +1285,7 @@ function buildCapacityStatus(
   return {
     capacityLabel: "Balanced",
     capacityTone: "balanced",
-    capacityDetail: "Hours worked and ticket volume are moving in line for the current window."
+    capacityDetail: "Hours worked and tickets created are moving in line for the current window."
   } satisfies Pick<ClientComparisonRow, "capacityLabel" | "capacityTone" | "capacityDetail">;
 }
 

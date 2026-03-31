@@ -57,7 +57,7 @@ export function ChannelStackedCard({
                           timeZone: "UTC"
                         }).format(new Date(`${point.date}T00:00:00.000Z`))}
                       </span>
-                      <span>{total.toFixed(0)} interactions</span>
+                      <span>{total.toFixed(0)} tickets</span>
                     </div>
                     <div className="flex h-4 overflow-hidden rounded-full bg-muted">
                       {CHANNELS.map((channel) => {

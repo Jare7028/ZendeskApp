@@ -73,29 +73,29 @@ export default async function AgentDetailPage({
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard
-          title="Total tickets"
+          title="Tickets created"
           value={formatNumber(detail.overview.totalInteractions, 0)}
-          description="Zendesk tickets handled by this agent in the selected window."
+          description="Zendesk tickets created in the selected window and attributed to this agent by the current mapping."
         />
         <MetricCard
-          title="Reply contacts per hour"
+          title="Reply workload per hour"
           value={formatNumber(detail.overview.repliesPerHourWorked, 2)}
-          description="Reply count divided by matched Connecteam hours."
+          description="Zendesk reply count divided by this agent's matched Connecteam hours."
         />
         <MetricCard
-          title="Tickets per hour worked"
+          title="Ticket intake per hour"
           value={formatNumber(detail.overview.interactionsPerHourWorked, 2)}
-          description="Ticket count divided by matched Connecteam hours."
+          description="Tickets created divided by this agent's matched Connecteam hours."
         />
         <MetricCard
-          title="Utilisation"
+          title="Active-day utilisation"
           value={formatPercent(detail.overview.agentUtilisationRatio)}
-          description="Scheduled hours on days with work versus total hours."
+          description="Matched hours on days with at least one attributed ticket versus this agent's total matched hours."
         />
         <MetricCard
           title="Requester wait time"
           value={formatMinutes(detail.overview.requesterWaitTimeMinutes)}
-          description="Average requester wait from the Zendesk metrics payload."
+          description="Average requester wait from the Zendesk metrics payload for this agent's in-range tickets."
         />
       </section>
 
@@ -111,7 +111,7 @@ export default async function AgentDetailPage({
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl bg-muted/40 p-4">
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client tickets/hr</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Client ticket intake/hr</p>
               <p className="mt-2 text-2xl font-semibold">
                 {formatNumber(detail.clientContext?.interactionsPerHourWorked ?? null, 2)}
               </p>
@@ -181,12 +181,12 @@ export default async function AgentDetailPage({
             primary: point.interactions,
             secondary: point.hoursWorked
           }))}
-          description={`${detail.granularity} throughput against scheduled hours.`}
+          description={`${detail.granularity} tickets created against matched hours.`}
           primaryColor="#0f766e"
-          primaryLabel="Interactions"
+          primaryLabel="Tickets created"
           secondaryColor="#d97706"
           secondaryLabel="Hours worked"
-          title="Volume trend"
+          title="Ticket creation trend"
         />
         <LineChartCard
           data={detail.trends.response.map((point) => ({

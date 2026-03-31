@@ -127,12 +127,12 @@ export function ClientComparisonView({
     <div className="space-y-4">
       <section className="grid gap-4 xl:grid-cols-2">
         <HighlightCard
-          description="Composite workload signal inferred from slower first replies, slower resolutions, and weaker throughput."
+          description="Composite workload signal inferred from slower first replies, slower resolutions, and weaker ticket-intake throughput."
           row={hardestClient}
           title="Hardest client"
         />
         <HighlightCard
-          description="Fast service times and stronger throughput make this the easiest portfolio to absorb right now."
+          description="Fast service times and stronger ticket-intake throughput make this the easiest portfolio to absorb right now."
           row={easiestClient}
           title="Easiest client"
         />
@@ -143,7 +143,7 @@ export function ClientComparisonView({
           <div className="space-y-2">
             <CardTitle>Client comparison</CardTitle>
             <CardDescription>
-              Side-by-side ticket load, service performance, and staffing context for the clients visible to this account.
+              Side-by-side tickets created, service performance, and staffing context for the clients visible to this account.
             </CardDescription>
           </div>
           <ExportControls csvHref={csvHref} pdfHref={pdfHref} />
@@ -175,7 +175,7 @@ export function ClientComparisonView({
                       <SortLink
                         activeKey={sort.key}
                         direction={sort.direction}
-                        label="Tkt/hr"
+                        label="Tickets/hr"
                         params={params}
                         sortKey="interactionsPerHourWorked"
                       />
@@ -271,7 +271,7 @@ export function ClientComparisonView({
         <CardHeader>
           <CardTitle>Capacity planning</CardTitle>
           <CardDescription>
-            Hours worked versus ticket volume, using the same precomputed metrics as the comparison table.
+            Hours worked versus tickets created, using the same precomputed metrics as the comparison table.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
@@ -289,7 +289,7 @@ export function ClientComparisonView({
                 </div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   <div className="rounded-2xl bg-background/80 p-3">
-                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Interactions</p>
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Tickets created</p>
                     <p className="mt-2 text-xl font-semibold">{formatNumber(row.totalInteractions, 0)}</p>
                   </div>
                   <div className="rounded-2xl bg-background/80 p-3">

@@ -50,10 +50,10 @@ export async function GET(request: NextRequest) {
       `Window: ${dashboard.filters.startDate} to ${dashboard.filters.endDate}`,
       `Visible agents in export: ${dashboard.leaderboard.rows.length}`,
       `Top agent: ${dashboard.leaderboard.rows[0]?.agentName ?? "No data"}`,
-      `Top ticket throughput: ${formatMetric(dashboard.leaderboard.rows[0]?.interactionsPerHourWorked ?? null)}`,
+      `Top ticket intake per hour: ${formatMetric(dashboard.leaderboard.rows[0]?.interactionsPerHourWorked ?? null)}`,
       ...dashboard.leaderboard.rows.slice(0, 6).map(
         (row, index) =>
-          `${index + 1}. ${row.agentName} (${row.clientName}) - ${formatMetric(row.totalInteractions, 0)} tickets, ${formatMetric(row.interactionsPerHourWorked)} tkt/hr`
+          `${index + 1}. ${row.agentName} (${row.clientName}) - ${formatMetric(row.totalInteractions, 0)} tickets created, ${formatMetric(row.interactionsPerHourWorked)} tickets/hr`
       )
     ];
   } else if (report === "clients") {
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
       `Easiest client: ${dashboard.clients.rows.find((row) => row.clientId === dashboard.clients.easiestClientId)?.clientName ?? "No data"}`,
       ...dashboard.clients.rows.slice(0, 6).map(
         (row) =>
-          `${row.clientName} - ${formatMetric(row.totalInteractions, 0)} tickets, ${formatMetric(row.interactionsPerHourWorked)} tkt/hr, ${row.capacityLabel}`
+          `${row.clientName} - ${formatMetric(row.totalInteractions, 0)} tickets created, ${formatMetric(row.interactionsPerHourWorked)} tickets/hr, ${row.capacityLabel}`
       )
     ];
   } else if (report === "agent-detail") {
@@ -89,14 +89,14 @@ export async function GET(request: NextRequest) {
       `Client: ${detail.agent.clientName}`,
       `Window: ${detail.filters.startDate} to ${detail.filters.endDate}`,
       `Granularity: ${detail.granularity}`,
-      `Total tickets: ${formatMetric(detail.overview.totalInteractions, 0)}`,
-      `Reply contacts per hour: ${formatMetric(detail.overview.repliesPerHourWorked)}`,
-      `Tickets per hour worked: ${formatMetric(detail.overview.interactionsPerHourWorked)}`,
+      `Tickets created: ${formatMetric(detail.overview.totalInteractions, 0)}`,
+      `Reply workload per hour: ${formatMetric(detail.overview.repliesPerHourWorked)}`,
+      `Ticket intake per hour: ${formatMetric(detail.overview.interactionsPerHourWorked)}`,
       `Average first reply: ${formatMetric(detail.overview.avgFirstReplyMinutes)}`,
       `Average full resolution: ${formatMetric(detail.overview.avgFullResolutionMinutes)}`,
       `Peer rank: ${detail.peers.rank ?? "No data"}`,
       ...detail.trends.volume.slice(-4).map(
-        (point) => `${point.date} - ${formatMetric(point.interactions, 0)} tickets / ${formatMetric(point.hoursWorked)} hours`
+        (point) => `${point.date} - ${formatMetric(point.interactions, 0)} tickets created / ${formatMetric(point.hoursWorked)} hours`
       )
     ];
   } else if (report === "client-detail") {
@@ -117,15 +117,15 @@ export async function GET(request: NextRequest) {
     lines = [
       `Window: ${detail.filters.startDate} to ${detail.filters.endDate}`,
       `Granularity: ${detail.granularity}`,
-      `Total tickets: ${formatMetric(detail.overview.totalInteractions, 0)}`,
-      `Reply contacts per hour: ${formatMetric(detail.overview.repliesPerHourWorked)}`,
-      `Tickets per hour worked: ${formatMetric(detail.overview.interactionsPerHourWorked)}`,
+      `Tickets created: ${formatMetric(detail.overview.totalInteractions, 0)}`,
+      `Reply workload per hour: ${formatMetric(detail.overview.repliesPerHourWorked)}`,
+      `Ticket intake per hour: ${formatMetric(detail.overview.interactionsPerHourWorked)}`,
       `Average first reply: ${formatMetric(detail.overview.avgFirstReplyMinutes)}`,
       `Average full resolution: ${formatMetric(detail.overview.avgFullResolutionMinutes)}`,
       `Capacity status: ${detail.portfolioContext?.capacityLabel ?? "No data"}`,
       ...detail.agents.rows.slice(0, 5).map(
         (row, index) =>
-          `${index + 1}. ${row.agentName} - ${formatMetric(row.totalInteractions, 0)} tickets, ${formatMetric(row.interactionsPerHourWorked)} tkt/hr`
+          `${index + 1}. ${row.agentName} - ${formatMetric(row.totalInteractions, 0)} tickets created, ${formatMetric(row.interactionsPerHourWorked)} tickets/hr`
       )
     ];
   } else {
@@ -136,13 +136,13 @@ export async function GET(request: NextRequest) {
       `Window: ${dashboard.filters.startDate} to ${dashboard.filters.endDate}`,
       `Client filter: ${dashboard.filters.clientId}`,
       `Agent filter: ${dashboard.filters.agentId}`,
-      `Total tickets: ${formatMetric(dashboard.overview.totalInteractions, 0)}`,
-      `Reply contacts per hour: ${formatMetric(dashboard.overview.repliesPerHourWorked)}`,
-      `Tickets per hour worked: ${formatMetric(dashboard.overview.interactionsPerHourWorked)}`,
+      `Tickets created: ${formatMetric(dashboard.overview.totalInteractions, 0)}`,
+      `Reply workload per hour: ${formatMetric(dashboard.overview.repliesPerHourWorked)}`,
+      `Ticket intake per hour: ${formatMetric(dashboard.overview.interactionsPerHourWorked)}`,
       `Average first reply: ${formatMetric(dashboard.overview.avgFirstReplyMinutes)}`,
       `Average full resolution: ${formatMetric(dashboard.overview.avgFullResolutionMinutes)}`,
       ...dashboard.trends.volume.slice(-5).map(
-        (point) => `${point.date} - ${formatMetric(point.interactions, 0)} tickets / ${formatMetric(point.hoursWorked)} hours`
+        (point) => `${point.date} - ${formatMetric(point.interactions, 0)} tickets created / ${formatMetric(point.hoursWorked)} hours`
       )
     ];
   }

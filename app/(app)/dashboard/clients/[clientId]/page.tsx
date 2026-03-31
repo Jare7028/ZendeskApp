@@ -73,29 +73,29 @@ export default async function ClientDetailPage({
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard
-          title="Total tickets"
+          title="Tickets created"
           value={formatNumber(detail.overview.totalInteractions, 0)}
-          description="Client ticket volume captured inside the current date range."
+          description="Zendesk tickets created for this client inside the selected date range."
         />
         <MetricCard
-          title="Reply contacts per hour"
+          title="Reply workload per hour"
           value={formatNumber(detail.overview.repliesPerHourWorked, 2)}
-          description="Reply count divided by team hours worked."
+          description="Zendesk reply count divided by matched team hours for this client's in-range tickets."
         />
         <MetricCard
-          title="Tickets per hour worked"
+          title="Ticket intake per hour"
           value={formatNumber(detail.overview.interactionsPerHourWorked, 2)}
-          description="Ticket count divided by team hours worked."
+          description="Tickets created divided by matched team hours."
         />
         <MetricCard
-          title="Utilisation"
+          title="Active-day utilisation"
           value={formatPercent(detail.overview.agentUtilisationRatio)}
-          description="Activity hours divided by total hours for the client team."
+          description="Matched hours on days with at least one attributed ticket divided by total matched hours for the client team."
         />
         <MetricCard
           title="Replies per ticket"
           value={formatNumber(detail.overview.repliesPerTicket, 2)}
-          description="Average reply count per ticket in the selected window."
+          description="Average reply count from Zendesk ticket metrics for tickets created in the selected window."
         />
       </section>
 
@@ -179,12 +179,12 @@ export default async function ClientDetailPage({
             primary: point.interactions,
             secondary: point.hoursWorked
           }))}
-          description={`${detail.granularity} volume against staffing.`}
+          description={`${detail.granularity} tickets created against matched staffing hours.`}
           primaryColor="#0f766e"
-          primaryLabel="Interactions"
+          primaryLabel="Tickets created"
           secondaryColor="#d97706"
           secondaryLabel="Hours worked"
-          title="Volume trend"
+          title="Ticket creation trend"
         />
         <LineChartCard
           data={detail.trends.response.map((point) => ({
