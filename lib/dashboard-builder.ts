@@ -130,6 +130,88 @@ export type DashboardBuilderConfigRecord = {
   updatedAt: string;
 };
 
+const DEFAULT_KPI_CONFIG: DashboardKpiWidgetConfig = {
+  metricKey: "tickets_created",
+  comparison: "previous_period",
+  format: "number"
+};
+
+const DEFAULT_LINE_CONFIG: DashboardLineWidgetConfig = {
+  metricKeys: ["tickets_created", "hours_worked"],
+  granularity: "daily",
+  stacked: false
+};
+
+const DEFAULT_BAR_CONFIG: DashboardBarWidgetConfig = {
+  metricKeys: ["tickets_created", "hours_worked"],
+  dimension: "client",
+  stacked: false
+};
+
+const DEFAULT_TABLE_CONFIG: DashboardTableWidgetConfig = {
+  dataset: "agents",
+  columns: ["name", "client", "tickets_created", "hours_worked", "avg_first_reply_minutes"],
+  limit: 8,
+  sort: { key: "tickets_created", direction: "desc" }
+};
+
+const SUPPORTED_LINE_METRICS: DashboardMetricKey[] = [
+  "tickets_created",
+  "hours_worked",
+  "avg_first_reply_minutes",
+  "avg_full_resolution_minutes"
+];
+
+const SUPPORTED_BAR_METRICS_BY_DIMENSION: Record<DashboardBarWidgetConfig["dimension"], DashboardMetricKey[]> = {
+  agent: [
+    "tickets_created",
+    "hours_worked",
+    "interactions_per_hour_worked",
+    "avg_first_reply_minutes",
+    "avg_full_resolution_minutes",
+    "agent_utilisation_ratio",
+    "reopens"
+  ],
+  channel: ["tickets_created"],
+  client: [
+    "tickets_created",
+    "hours_worked",
+    "interactions_per_hour_worked",
+    "avg_first_reply_minutes",
+    "avg_full_resolution_minutes",
+    "agent_utilisation_ratio",
+    "replies_per_ticket",
+    "sla_first_reply_compliance",
+    "sla_full_resolution_compliance"
+  ]
+};
+
+const SUPPORTED_TABLE_COLUMNS_BY_DATASET: Record<DashboardWidgetDataset, DashboardTableColumnKey[]> = {
+  agents: [
+    "name",
+    "client",
+    "tickets_created",
+    "hours_worked",
+    "interactions_per_hour_worked",
+    "avg_first_reply_minutes",
+    "avg_full_resolution_minutes",
+    "agent_utilisation_ratio",
+    "reopens"
+  ],
+  clients: [
+    "name",
+    "tickets_created",
+    "hours_worked",
+    "interactions_per_hour_worked",
+    "replies_per_ticket",
+    "avg_first_reply_minutes",
+    "avg_full_resolution_minutes",
+    "agent_utilisation_ratio",
+    "sla_first_reply_compliance",
+    "sla_full_resolution_compliance"
+  ]
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -229,52 +311,65 @@ function normalizeKpiConfig(value: unknown): DashboardKpiWidgetConfig {
   const config = isRecord(value) ? value : {};
 
   return {
-    metricKey: asMetricKey(config.metricKey, "tickets_created"),
-    comparison: config.comparison === "previous_period" ? "previous_period" : "none",
+    metricKey: asMetricKey(config.metricKey, DEFAULT_KPI_CONFIG.metricKey),
+    comparison: config.comparison === "none" || config.comparison === "previous_period" ? config.comparison : DEFAULT_KPI_CONFIG.comparison,
     format:
       config.format === "percent" || config.format === "minutes" || config.format === "number"
         ? config.format
-        : "number"
+        : DEFAULT_KPI_CONFIG.format
   };
 }
 
 function normalizeLineConfig(value: unknown): DashboardLineWidgetConfig {
   const config = isRecord(value) ? value : {};
+  const metricKeys = asMetricKeys(config.metricKeys, DEFAULT_LINE_CONFIG.metricKeys).filter((metricKey) =>
+    SUPPORTED_LINE_METRICS.includes(metricKey)
+  );
 
   return {
-    metricKeys: asMetricKeys(config.metricKeys, ["tickets_created"]),
-    granularity: asGranularity(config.granularity, "daily"),
-    stacked: asBoolean(config.stacked, false)
+    metricKeys: metricKeys.length > 0 ? metricKeys : DEFAULT_LINE_CONFIG.metricKeys,
+    granularity: asGranularity(config.granularity, DEFAULT_LINE_CONFIG.granularity),
+    stacked: asBoolean(config.stacked, DEFAULT_LINE_CONFIG.stacked)
   };
 }
 
 function normalizeBarConfig(value: unknown): DashboardBarWidgetConfig {
   const config = isRecord(value) ? value : {};
+  const dimension =
+    config.dimension === "client" || config.dimension === "agent" || config.dimension === "channel"
+      ? config.dimension
+      : DEFAULT_BAR_CONFIG.dimension;
+  const metricKeys = asMetricKeys(config.metricKeys, DEFAULT_BAR_CONFIG.metricKeys).filter((metricKey) =>
+    SUPPORTED_BAR_METRICS_BY_DIMENSION[dimension].includes(metricKey)
+  );
 
   return {
-    metricKeys: asMetricKeys(config.metricKeys, ["tickets_created"]),
-    dimension:
-      config.dimension === "client" || config.dimension === "agent" || config.dimension === "channel"
-        ? config.dimension
-        : "client",
-    stacked: asBoolean(config.stacked, false)
+    metricKeys: metricKeys.length > 0 ? metricKeys : SUPPORTED_BAR_METRICS_BY_DIMENSION[dimension].slice(0, 2),
+    dimension,
+    stacked: asBoolean(config.stacked, DEFAULT_BAR_CONFIG.stacked)
   };
 }
 
 function normalizeTableConfig(value: unknown): DashboardTableWidgetConfig {
   const config = isRecord(value) ? value : {};
   const sort = isRecord(config.sort) ? config.sort : {};
+  const dataset = asWidgetDataset(config.dataset, DEFAULT_TABLE_CONFIG.dataset);
+  const supportedColumns = SUPPORTED_TABLE_COLUMNS_BY_DATASET[dataset];
+  const columns = asTableColumns(config.columns, DEFAULT_TABLE_CONFIG.columns).filter((column) => supportedColumns.includes(column));
+  const sortKey =
+    typeof sort.key === "string" && supportedColumns.includes(sort.key as DashboardTableColumnKey)
+      ? (sort.key as DashboardTableColumnKey)
+      : supportedColumns.includes(DEFAULT_TABLE_CONFIG.sort.key)
+        ? DEFAULT_TABLE_CONFIG.sort.key
+        : supportedColumns[0];
 
   return {
-    dataset: asWidgetDataset(config.dataset, "agents"),
-    columns: asTableColumns(config.columns, ["name", "client", "tickets_created", "hours_worked"]),
-    limit: asInteger(config.limit, 10, { min: 1, max: 100 }),
+    dataset,
+    columns: columns.length > 0 ? columns : supportedColumns.slice(0, 5),
+    limit: asInteger(config.limit, DEFAULT_TABLE_CONFIG.limit, { min: 1, max: 100 }),
     sort: {
-      key:
-        typeof sort.key === "string" && DASHBOARD_TABLE_COLUMN_KEYS.includes(sort.key as DashboardTableColumnKey)
-          ? (sort.key as DashboardTableColumnKey)
-          : "tickets_created",
-      direction: asSortDirection(sort.direction, "desc")
+      key: sortKey,
+      direction: asSortDirection(sort.direction, DEFAULT_TABLE_CONFIG.sort.direction)
     }
   };
 }
