@@ -3,7 +3,7 @@ import "server-only";
 import { cache } from "react";
 
 import { getHighestRole, type AppRole } from "@/lib/auth/roles";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { canCreateServerSupabaseClient, createServerSupabaseClient } from "@/lib/supabase/server";
 
 type RoleRow = {
   is_primary: boolean;
@@ -26,6 +26,10 @@ export type UserContext = {
 };
 
 export const getServerSessionUser = cache(async () => {
+  if (!canCreateServerSupabaseClient()) {
+    return null;
+  }
+
   const supabase = createServerSupabaseClient();
   const {
     data: { user }
