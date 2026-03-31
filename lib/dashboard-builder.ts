@@ -166,6 +166,7 @@ const SUPPORTED_LINE_METRICS: DashboardMetricKey[] = [
 const SUPPORTED_BAR_METRICS_BY_DIMENSION: Record<DashboardBarWidgetConfig["dimension"], DashboardMetricKey[]> = {
   agent: [
     "tickets_created",
+    "ticket_replies",
     "hours_worked",
     "interactions_per_hour_worked",
     "avg_first_reply_minutes",
@@ -192,6 +193,7 @@ const SUPPORTED_TABLE_COLUMNS_BY_DATASET: Record<DashboardWidgetDataset, Dashboa
     "name",
     "client",
     "tickets_created",
+    "ticket_replies",
     "hours_worked",
     "interactions_per_hour_worked",
     "avg_first_reply_minutes",

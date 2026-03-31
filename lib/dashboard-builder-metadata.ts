@@ -89,6 +89,7 @@ export const LINE_METRIC_OPTIONS: DashboardMetricKey[] = [
 export const BAR_METRIC_OPTIONS_BY_DIMENSION = {
   agent: [
     "tickets_created",
+    "ticket_replies",
     "hours_worked",
     "interactions_per_hour_worked",
     "avg_first_reply_minutes",
@@ -115,6 +116,7 @@ export const TABLE_COLUMNS_BY_DATASET = {
     "name",
     "client",
     "tickets_created",
+    "ticket_replies",
     "hours_worked",
     "interactions_per_hour_worked",
     "avg_first_reply_minutes",

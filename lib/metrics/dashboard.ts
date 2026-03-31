@@ -180,6 +180,7 @@ export type AgentLeaderboardRow = {
   clientId: string;
   clientName: string;
   totalInteractions: number;
+  totalReplies: number;
   totalHoursWorked: number;
   interactionsPerHourWorked: number | null;
   avgFirstReplyMinutes: number | null;
@@ -1200,6 +1201,7 @@ function buildAgentLeaderboardRows(rows: ComputedMetricRow[], agentOptions: Agen
         clientId: entry.clientId,
         clientName: entry.clientName,
         totalInteractions: entry.metrics.totalInteractions,
+        totalReplies: entry.metrics.totalReplies,
         totalHoursWorked: entry.metrics.totalHoursWorked,
         interactionsPerHourWorked:
           entry.metrics.totalHoursWorked > 0

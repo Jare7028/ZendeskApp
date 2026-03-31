@@ -73,6 +73,7 @@ type BuilderDashboardData = {
     name: string;
     client: string;
     ticketsCreated: number;
+    ticketReplies: number;
     hoursWorked: number;
     interactionsPerHourWorked: number | null;
     avgFirstReplyMinutes: number | null;
@@ -163,6 +164,7 @@ function buildBuilderDashboardData(current: DashboardData, previous: DashboardDa
       name: row.agentName,
       client: row.clientName,
       ticketsCreated: row.totalInteractions,
+      ticketReplies: row.totalReplies,
       hoursWorked: row.totalHoursWorked,
       interactionsPerHourWorked: row.interactionsPerHourWorked,
       avgFirstReplyMinutes: row.avgFirstReplyMinutes,
@@ -279,6 +281,7 @@ function getBarData(data: BuilderDashboardData, widget: Extract<DashboardWidget,
           hint: row.client,
           values: {
             tickets_created: row.ticketsCreated,
+            ticket_replies: row.ticketReplies,
             hours_worked: row.hoursWorked,
             interactions_per_hour_worked: row.interactionsPerHourWorked,
             avg_first_reply_minutes: row.avgFirstReplyMinutes,
@@ -321,7 +324,7 @@ function getTableData(data: BuilderDashboardData, widget: Extract<DashboardWidge
           name: row.name,
           client: row.client,
           tickets_created: row.ticketsCreated,
-          ticket_replies: null,
+          ticket_replies: row.ticketReplies,
           hours_worked: row.hoursWorked,
           interactions_per_hour_worked: row.interactionsPerHourWorked,
           replies_per_ticket: null,
