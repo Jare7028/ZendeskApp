@@ -1485,8 +1485,8 @@ export function DashboardBuilderShell({
             </p>
           </div>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            {isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-            <span>{isPending ? "Saving changes" : "Saved to your workspace"}</span>
+            {isPending || isDataPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+            <span>{isPending || isDataPending ? "Updating tab" : "Saved to your workspace"}</span>
           </div>
         </div>
       </section>
@@ -1516,9 +1516,14 @@ export function DashboardBuilderShell({
                   {activeTab.description ?? "Saved widgets render directly in this builder canvas."}
                 </CardDescription>
               </div>
-              <Badge className="rounded-full border border-border/70 bg-background px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-foreground">
-                {activeTab.widgets.length === 1 ? "1 widget" : `${activeTab.widgets.length} widgets`}
-              </Badge>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="rounded-full border border-border/70 bg-background px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-foreground">
+                  {activeTab.widgets.length === 1 ? "1 widget" : `${activeTab.widgets.length} widgets`}
+                </Badge>
+                <Badge className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-emerald-900">
+                  {activeTab.dateRange.start} to {activeTab.dateRange.end}
+                </Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
