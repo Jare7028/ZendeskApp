@@ -4,18 +4,26 @@ import { useState, useTransition } from "react";
 import { LayoutGrid, LoaderCircle, PanelTop, Plus, Sparkles } from "lucide-react";
 
 import { DashboardTabBar } from "@/components/dashboard/dashboard-tab-bar";
+import { DashboardWidgetInspector } from "@/components/dashboard/dashboard-widget-inspector";
 import { formatMinutes, formatNumber, formatPercent } from "@/components/dashboard/dashboard-format";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  METRIC_FORMATS,
+  METRIC_LABELS,
+  TABLE_COLUMN_LABELS
+} from "@/lib/dashboard-builder-metadata";
 import {
   type DashboardBuilderConfig,
   type DashboardBuilderConfigRecord,
   type DashboardMetricKey,
   type DashboardTab,
   type DashboardTableColumnKey,
-  type DashboardWidget
+  type DashboardWidget,
+  type DashboardWidgetType
 } from "@/lib/dashboard-builder";
 import { type DashboardData } from "@/lib/metrics/dashboard";
+import { cn } from "@/lib/utils";
 
 type BuilderOverviewSnapshot = {
   totalInteractions: number;
@@ -100,64 +108,6 @@ type BuilderTableRow = {
 };
 
 const CHART_COLORS = ["#0f766e", "#d97706", "#0f4c81", "#7c6f64"] as const;
-
-const METRIC_LABELS: Record<DashboardMetricKey, string> = {
-  tickets_created: "Tickets created",
-  ticket_replies: "Ticket replies",
-  hours_worked: "Hours worked",
-  interactions_per_hour_worked: "Tickets per hour",
-  replies_per_hour_worked: "Replies per hour",
-  replies_per_ticket: "Replies per ticket",
-  avg_first_reply_minutes: "Avg first reply",
-  avg_full_resolution_minutes: "Avg resolution",
-  median_first_reply_minutes: "Median first reply",
-  median_full_resolution_minutes: "Median resolution",
-  p90_first_reply_minutes: "P90 first reply",
-  p90_full_resolution_minutes: "P90 resolution",
-  agent_utilisation_ratio: "Utilisation",
-  requester_wait_time_minutes: "Requester wait",
-  reopens: "Reopens",
-  reopens_per_agent: "Reopens per agent",
-  sla_first_reply_compliance: "First reply SLA",
-  sla_full_resolution_compliance: "Resolution SLA"
-};
-
-const METRIC_FORMATS: Record<DashboardMetricKey, "number" | "percent" | "minutes"> = {
-  tickets_created: "number",
-  ticket_replies: "number",
-  hours_worked: "number",
-  interactions_per_hour_worked: "number",
-  replies_per_hour_worked: "number",
-  replies_per_ticket: "number",
-  avg_first_reply_minutes: "minutes",
-  avg_full_resolution_minutes: "minutes",
-  median_first_reply_minutes: "minutes",
-  median_full_resolution_minutes: "minutes",
-  p90_first_reply_minutes: "minutes",
-  p90_full_resolution_minutes: "minutes",
-  agent_utilisation_ratio: "percent",
-  requester_wait_time_minutes: "minutes",
-  reopens: "number",
-  reopens_per_agent: "number",
-  sla_first_reply_compliance: "percent",
-  sla_full_resolution_compliance: "percent"
-};
-
-const TABLE_COLUMN_LABELS: Record<DashboardTableColumnKey, string> = {
-  name: "Name",
-  client: "Client",
-  tickets_created: "Tickets",
-  ticket_replies: "Replies",
-  hours_worked: "Hours",
-  interactions_per_hour_worked: "Tickets/hr",
-  replies_per_ticket: "Replies/ticket",
-  avg_first_reply_minutes: "First reply",
-  avg_full_resolution_minutes: "Resolution",
-  agent_utilisation_ratio: "Utilisation",
-  sla_first_reply_compliance: "First reply SLA",
-  sla_full_resolution_compliance: "Resolution SLA",
-  reopens: "Reopens"
-};
 
 function buildBuilderDashboardData(current: DashboardData, previous: DashboardData | null = null): BuilderDashboardData {
   const buildSnapshot = (data: DashboardData): BuilderOverviewSnapshot => ({
@@ -459,10 +409,14 @@ function buildLinePath(values: number[], width: number, height: number, maxValue
 }
 
 function DashboardBuilderWidgetCard({
+  isSelected,
+  onSelect,
   widget,
   data,
   previousData
 }: {
+  isSelected: boolean;
+  onSelect: () => void;
   widget: DashboardWidget;
   data: DashboardData;
   previousData?: DashboardData | null;
@@ -481,7 +435,21 @@ function DashboardBuilderWidgetCard({
         : null;
 
     return (
-      <div className="flex h-full flex-col justify-between rounded-[28px] border border-border/60 bg-gradient-to-br from-background to-muted/30 p-5">
+      <div
+        className={cn(
+          "flex h-full cursor-pointer flex-col justify-between rounded-[28px] border bg-gradient-to-br from-background to-muted/30 p-5 transition",
+          isSelected ? "border-foreground shadow-sm ring-2 ring-foreground/10" : "border-border/60 hover:border-border"
+        )}
+        onClick={onSelect}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onSelect();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+      >
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-base font-semibold tracking-tight text-foreground">{widget.title}</p>
@@ -505,7 +473,21 @@ function DashboardBuilderWidgetCard({
   }
 
   return (
-    <div className="flex h-full flex-col rounded-[28px] border border-border/60 bg-background/95 p-5">
+    <div
+      className={cn(
+        "flex h-full cursor-pointer flex-col rounded-[28px] border bg-background/95 p-5 transition",
+        isSelected ? "border-foreground shadow-sm ring-2 ring-foreground/10" : "border-border/60 hover:border-border"
+      )}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-lg font-semibold tracking-tight text-foreground">{widget.title}</p>
@@ -747,47 +729,62 @@ function buildTabTitle(tabs: DashboardTab[]) {
   return `Tab ${tabs.length + 1}`;
 }
 
-function getNextWidgetDefinition(index: number) {
-  const nextType = index % 4;
-
-  if (nextType === 0) {
-    return {
-      config: { comparison: "previous_period", format: "number", metricKey: "tickets_created" },
-      description: "Compact snapshot for the current window.",
-      title: "Tickets created",
-      type: "kpi"
-    } satisfies Pick<Extract<DashboardWidget, { type: "kpi" }>, "type" | "title" | "description" | "config">;
+function getWidgetTemplate(type: DashboardWidgetType) {
+  switch (type) {
+    case "line":
+      return {
+        config: { metricKeys: ["tickets_created", "hours_worked"], granularity: "daily", stacked: false },
+        description: "Ticket volume against matched hours.",
+        layout: { h: 4, minH: 3, minW: 3, w: 8, x: 0, y: 0 },
+        title: "Volume trend",
+        type
+      } satisfies Pick<Extract<DashboardWidget, { type: "line" }>, "type" | "title" | "description" | "config" | "layout">;
+    case "bar":
+      return {
+        config: { metricKeys: ["tickets_created", "hours_worked"], dimension: "client", stacked: false },
+        description: "Top clients by volume and staffing.",
+        layout: { h: 4, minH: 3, minW: 3, w: 8, x: 0, y: 0 },
+        title: "Client mix",
+        type
+      } satisfies Pick<Extract<DashboardWidget, { type: "bar" }>, "type" | "title" | "description" | "config" | "layout">;
+    case "table":
+      return {
+        config: {
+          columns: ["name", "client", "tickets_created", "hours_worked", "avg_first_reply_minutes"],
+          dataset: "agents",
+          limit: 10,
+          sort: { key: "tickets_created", direction: "desc" }
+        },
+        description: "Concise agent snapshot for the active window.",
+        layout: { h: 4, minH: 3, minW: 3, w: 6, x: 0, y: 0 },
+        title: "Agent table",
+        type
+      } satisfies Pick<Extract<DashboardWidget, { type: "table" }>, "type" | "title" | "description" | "config" | "layout">;
+    case "kpi":
+    default:
+      return {
+        config: { comparison: "previous_period", format: "number", metricKey: "tickets_created" },
+        description: "Compact snapshot for the current window.",
+        layout: { h: 3, minH: 2, minW: 2, w: 4, x: 0, y: 0 },
+        title: "Tickets created",
+        type: "kpi"
+      } satisfies Pick<Extract<DashboardWidget, { type: "kpi" }>, "type" | "title" | "description" | "config" | "layout">;
   }
+}
 
-  if (nextType === 1) {
-    return {
-      config: { metricKeys: ["tickets_created", "hours_worked"], granularity: "daily", stacked: false },
-      description: "Ticket volume against matched hours.",
-      title: "Volume trend",
-      type: "line"
-    } satisfies Pick<Extract<DashboardWidget, { type: "line" }>, "type" | "title" | "description" | "config">;
-  }
-
-  if (nextType === 2) {
-    return {
-      config: { metricKeys: ["tickets_created", "hours_worked"], dimension: "client", stacked: false },
-      description: "Top clients by volume and staffing.",
-      title: "Client mix",
-      type: "bar"
-    } satisfies Pick<Extract<DashboardWidget, { type: "bar" }>, "type" | "title" | "description" | "config">;
-  }
+function buildWidget(widgetId: string, index: number, type: DashboardWidgetType): DashboardWidget {
+  const template = getWidgetTemplate(type);
 
   return {
-    config: {
-      columns: ["name", "client", "tickets_created", "hours_worked", "avg_first_reply_minutes"],
-      dataset: "agents",
-      limit: 6,
-      sort: { key: "tickets_created", direction: "desc" }
-    },
-    description: "Concise agent snapshot for the active window.",
-    title: "Agent table",
-    type: "table"
-  } satisfies Pick<Extract<DashboardWidget, { type: "table" }>, "type" | "title" | "description" | "config">;
+    ...template,
+    id: widgetId,
+    layout: { ...template.layout, y: index * 3 }
+  } as DashboardWidget;
+}
+
+function getNextWidgetType(index: number): DashboardWidgetType {
+  const widgetTypes: DashboardWidgetType[] = ["kpi", "line", "bar", "table"];
+  return widgetTypes[index % widgetTypes.length] ?? "kpi";
 }
 
 async function saveConfig(config: DashboardBuilderConfig) {
@@ -808,12 +805,16 @@ async function saveConfig(config: DashboardBuilderConfig) {
 function BuilderCanvas({
   data,
   onAddWidget,
+  onSelectWidget,
   previousData,
+  selectedWidgetId,
   tab
 }: {
   data: DashboardData;
   onAddWidget: () => void;
+  onSelectWidget: (widgetId: string) => void;
   previousData?: DashboardData | null;
+  selectedWidgetId: string;
   tab: DashboardTab;
 }) {
   if (tab.widgets.length === 0) {
@@ -862,7 +863,14 @@ function BuilderCanvas({
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       {tab.widgets.map((widget) => (
-        <DashboardBuilderWidgetCard key={widget.id} data={data} previousData={previousData} widget={widget} />
+        <DashboardBuilderWidgetCard
+          key={widget.id}
+          data={data}
+          isSelected={widget.id === selectedWidgetId}
+          onSelect={() => onSelectWidget(widget.id)}
+          previousData={previousData}
+          widget={widget}
+        />
       ))}
     </div>
   );
@@ -879,14 +887,17 @@ export function DashboardBuilderShell({
 }) {
   const [record, setRecord] = useState(initialRecord);
   const [activeTabId, setActiveTabId] = useState(initialRecord.config.tabs[0]?.id ?? "");
+  const [selectedWidgetId, setSelectedWidgetId] = useState(initialRecord.config.tabs[0]?.widgets[0]?.id ?? "");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const activeTab = record.config.tabs.find((tab) => tab.id === activeTabId) ?? record.config.tabs[0];
+  const selectedWidget = activeTab?.widgets.find((widget) => widget.id === selectedWidgetId) ?? activeTab?.widgets[0] ?? null;
 
-  function persistConfig(nextConfig: DashboardBuilderConfig, nextActiveTabId: string) {
+  function persistConfig(nextConfig: DashboardBuilderConfig, nextActiveTabId: string, nextSelectedWidgetId = selectedWidgetId) {
     setRecord((current) => ({ ...current, config: nextConfig }));
     setActiveTabId(nextActiveTabId);
+    setSelectedWidgetId(nextSelectedWidgetId);
     setSaveError(null);
 
     startTransition(() => {
@@ -914,16 +925,15 @@ export function DashboardBuilderShell({
         ...record.config,
         tabs: [...record.config.tabs, nextTab]
       },
-      nextTab.id
+      nextTab.id,
+      ""
     );
   }
 
-  function handleAddPlaceholderWidget() {
+  function updateWidget(widgetId: string, updater: (widget: DashboardWidget) => DashboardWidget) {
     if (!activeTab) {
       return;
     }
-
-    const nextWidget = getNextWidgetDefinition(activeTab.widgets.length);
 
     const nextConfig = {
       ...record.config,
@@ -931,26 +941,61 @@ export function DashboardBuilderShell({
         tab.id === activeTab.id
           ? {
               ...tab,
-              widgets: [
-                ...tab.widgets,
-                {
-                  ...nextWidget,
-                  id: `${tab.id}-widget-${tab.widgets.length + 1}`,
-                  layout: { h: 3, minH: 2, minW: 2, w: 4, x: 0, y: tab.widgets.length * 3 },
-                  ...(nextWidget.type === "line" || nextWidget.type === "bar"
-                    ? { layout: { h: 4, minH: 3, minW: 3, w: 8, x: 0, y: tab.widgets.length * 3 } }
-                    : {}),
-                  ...(nextWidget.type === "table"
-                    ? { layout: { h: 4, minH: 3, minW: 3, w: 6, x: 0, y: tab.widgets.length * 3 } }
-                    : {})
-                }
-              ]
+              widgets: tab.widgets.map((widget) => (widget.id === widgetId ? updater(widget) : widget))
             }
           : tab
       )
     } satisfies DashboardBuilderConfig;
 
-    persistConfig(nextConfig, activeTab.id);
+    persistConfig(nextConfig, activeTab.id, widgetId);
+  }
+
+  function handleChangeWidgetType(widgetId: string, nextType: DashboardWidgetType) {
+    updateWidget(widgetId, (widget) => {
+      if (widget.type === nextType) {
+        return widget;
+      }
+
+      const widgetIndex = activeTab.widgets.findIndex((entry) => entry.id === widget.id);
+      const currentTemplate = getWidgetTemplate(widget.type);
+      const nextTemplate = getWidgetTemplate(nextType);
+      const nextWidget = buildWidget(widget.id, widgetIndex, nextType);
+
+      return {
+        ...nextWidget,
+        description: widget.description === currentTemplate.description ? nextTemplate.description : widget.description,
+        id: widget.id,
+        layout: {
+          ...nextWidget.layout,
+          x: widget.layout.x,
+          y: widget.layout.y
+        },
+        title: widget.title === currentTemplate.title ? nextTemplate.title : widget.title
+      };
+    });
+  }
+
+  function handleAddWidget() {
+    if (!activeTab) {
+      return;
+    }
+
+    const nextWidgetId = `${activeTab.id}-widget-${activeTab.widgets.length + 1}`;
+    const nextWidget = buildWidget(nextWidgetId, activeTab.widgets.length, getNextWidgetType(activeTab.widgets.length));
+
+    const nextConfig = {
+      ...record.config,
+      tabs: record.config.tabs.map((tab) =>
+        tab.id === activeTab.id
+          ? {
+              ...tab,
+              widgets: [...tab.widgets, nextWidget]
+            }
+          : tab
+      )
+    } satisfies DashboardBuilderConfig;
+
+    persistConfig(nextConfig, activeTab.id, nextWidgetId);
   }
 
   if (!activeTab) {
@@ -981,11 +1026,15 @@ export function DashboardBuilderShell({
         activeTabId={activeTab.id}
         disabled={isPending}
         onAddTab={handleAddTab}
-        onSelectTab={setActiveTabId}
+        onSelectTab={(tabId) => {
+          setActiveTabId(tabId);
+          const nextTab = record.config.tabs.find((tab) => tab.id === tabId);
+          setSelectedWidgetId(nextTab?.widgets[0]?.id ?? "");
+        }}
         tabs={record.config.tabs}
       />
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Card className="bg-background/95">
           <CardHeader>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Canvas</p>
@@ -1004,37 +1053,26 @@ export function DashboardBuilderShell({
           <CardContent>
             <BuilderCanvas
               data={initialDashboardData}
-              onAddWidget={handleAddPlaceholderWidget}
+              onAddWidget={handleAddWidget}
+              onSelectWidget={setSelectedWidgetId}
               previousData={previousDashboardData}
+              selectedWidgetId={selectedWidget?.id ?? ""}
               tab={activeTab}
             />
           </CardContent>
         </Card>
 
-        <Card className="bg-muted/20">
-          <CardHeader>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Inspector</p>
-            <CardTitle>Current tab</CardTitle>
-            <CardDescription>High-level structure only. Configuration tools come later.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            <div className="rounded-3xl border border-border/70 bg-background px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Tab title</p>
-              <p className="mt-2 font-medium">{activeTab.title}</p>
-            </div>
-            <div className="rounded-3xl border border-border/70 bg-background px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Widgets</p>
-              <p className="mt-2 font-medium">{activeTab.widgets.length}</p>
-            </div>
-            <div className="rounded-3xl border border-border/70 bg-background px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Updated</p>
-              <p className="mt-2 font-medium">{new Date(record.updatedAt).toLocaleString("en-GB")}</p>
-            </div>
-            {saveError ? (
-              <div className="rounded-3xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-900">{saveError}</div>
-            ) : null}
-          </CardContent>
-        </Card>
+        <DashboardWidgetInspector
+          disabled={isPending}
+          onAddWidget={handleAddWidget}
+          onChangeWidgetType={handleChangeWidgetType}
+          onSelectWidget={setSelectedWidgetId}
+          onUpdateWidget={updateWidget}
+          saveError={saveError}
+          selectedWidget={selectedWidget}
+          updatedAt={record.updatedAt}
+          widgets={activeTab.widgets}
+        />
       </section>
     </div>
   );
