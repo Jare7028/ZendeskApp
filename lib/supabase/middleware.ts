@@ -8,7 +8,32 @@ export async function updateSession(request: NextRequest) {
     request
   });
 
-  const supabase = createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {
+  const { pathname, search } = request.nextUrl;
+  const isAuthPath =
+    pathname === "/login" ||
+    pathname === "/signup" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password";
+  const isProtectedPath = pathname.startsWith("/dashboard") || pathname.startsWith("/connections") || pathname.startsWith("/admin");
+
+  let supabaseUrl: string;
+  let supabaseAnonKey: string;
+
+  try {
+    supabaseUrl = getSupabaseUrl();
+    supabaseAnonKey = getSupabaseAnonKey();
+  } catch {
+    if (isProtectedPath) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("next", `${pathname}${search}`);
+      return NextResponse.redirect(url);
+    }
+
+    return response;
+  }
+
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       get(name: string) {
         return request.cookies.get(name)?.value;
@@ -34,13 +59,6 @@ export async function updateSession(request: NextRequest) {
     data: { user }
   } = await supabase.auth.getUser();
 
-  const { pathname, search } = request.nextUrl;
-  const isAuthPath =
-    pathname === "/login" ||
-    pathname === "/signup" ||
-    pathname === "/forgot-password" ||
-    pathname === "/reset-password";
-  const isProtectedPath = pathname.startsWith("/dashboard") || pathname.startsWith("/connections") || pathname.startsWith("/admin");
 
   if (!user && isProtectedPath) {
     const url = request.nextUrl.clone();
