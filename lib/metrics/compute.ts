@@ -7,6 +7,8 @@ type JsonObject = Record<string, unknown>;
 type AgentMappingRow = {
   id: string;
   client_id: string;
+  zendesk_connection_id: string | null;
+  connecteam_connection_id: string | null;
   zendesk_agent_id: string | null;
   connecteam_user_id: string | null;
   display_name: string;
@@ -31,6 +33,8 @@ type TicketMetricRow = {
 
 type TimesheetRow = {
   client_id: string;
+  zendesk_connection_id: string | null;
+  connecteam_connection_id: string | null;
   agent_mapping_id: string | null;
   work_date: string;
   minutes_worked: number;
@@ -194,6 +198,54 @@ function getAccumulator(
   return created.value;
 }
 
+function getScopedConnecteamUserKey(clientId: string, connecteamConnectionId: string | null, connecteamUserId: string) {
+  return `${clientId}:${connecteamConnectionId ?? "none"}:${connecteamUserId}`;
+}
+
+function getClientConnecteamUserKey(clientId: string, connecteamUserId: string) {
+  return `${clientId}:${connecteamUserId}`;
+}
+
+function resolveTimesheetAgentMapping(
+  timesheet: TimesheetRow,
+  mappingById: Map<string, AgentMappingRow>,
+  mappingByScopedConnecteamUser: Map<string, AgentMappingRow>,
+  mappingsByClientConnecteamUser: Map<string, AgentMappingRow[]>
+) {
+  if (timesheet.agent_mapping_id) {
+    const directMatch = mappingById.get(timesheet.agent_mapping_id);
+    if (directMatch) {
+      return directMatch;
+    }
+  }
+
+  const connecteamUserId = timesheet.payload?.connecteam_user_id;
+  if (!connecteamUserId) {
+    return null;
+  }
+
+  const scopedMatch = mappingByScopedConnecteamUser.get(
+    getScopedConnecteamUserKey(timesheet.client_id, timesheet.connecteam_connection_id, String(connecteamUserId))
+  );
+  if (scopedMatch) {
+    return scopedMatch;
+  }
+
+  const candidates =
+    mappingsByClientConnecteamUser.get(getClientConnecteamUserKey(timesheet.client_id, String(connecteamUserId))) ?? [];
+
+  if (timesheet.zendesk_connection_id) {
+    const zendeskScopedMatch = candidates.find(
+      (mapping) => mapping.zendesk_connection_id === timesheet.zendesk_connection_id
+    );
+    if (zendeskScopedMatch) {
+      return zendeskScopedMatch;
+    }
+  }
+
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 function pushTicketMetrics(accumulator: Accumulator, metric: TicketMetricRow | null) {
   const firstReply = metric?.first_response_minutes ?? null;
   const fullResolution = metric?.full_resolution_minutes ?? null;
@@ -338,7 +390,7 @@ export async function recomputeComputedMetricsForDateRange({
   const [agentMappingsResult, ticketsResult, timesheetsResult] = await Promise.all([
     supabase
       .from("agent_mappings")
-      .select("id,client_id,zendesk_agent_id,connecteam_user_id,display_name,inclusion_status")
+      .select("id,client_id,zendesk_connection_id,connecteam_connection_id,zendesk_agent_id,connecteam_user_id,display_name,inclusion_status")
       .in("client_id", clientIds),
     supabase
       .from("tickets")
@@ -348,7 +400,7 @@ export async function recomputeComputedMetricsForDateRange({
       .lte("created_at_source", `${endDate}T23:59:59.999Z`),
     supabase
       .from("timesheet_data")
-      .select("client_id,agent_mapping_id,work_date,minutes_worked,payload")
+      .select("client_id,zendesk_connection_id,connecteam_connection_id,agent_mapping_id,work_date,minutes_worked,payload")
       .in("client_id", clientIds)
       .gte("work_date", startDate)
       .lte("work_date", endDate)
@@ -405,11 +457,29 @@ export async function recomputeComputedMetricsForDateRange({
       .filter((mapping) => mapping.zendesk_agent_id)
       .map((mapping) => [`${mapping.client_id}:${mapping.zendesk_agent_id as string}`, mapping])
   );
-  const mappingByConnecteamUserId = new Map(
+  const mappingByScopedConnecteamUser = new Map(
     includedMappings
       .filter((mapping) => mapping.connecteam_user_id)
-      .map((mapping) => [`${mapping.client_id}:${mapping.connecteam_user_id as string}`, mapping])
+      .map((mapping) => [
+        getScopedConnecteamUserKey(
+          mapping.client_id,
+          mapping.connecteam_connection_id,
+          mapping.connecteam_user_id as string
+        ),
+        mapping
+      ])
   );
+  const mappingsByClientConnecteamUser = includedMappings.reduce((store, mapping) => {
+    if (!mapping.connecteam_user_id) {
+      return store;
+    }
+
+    const key = getClientConnecteamUserKey(mapping.client_id, mapping.connecteam_user_id);
+    const existing = store.get(key) ?? [];
+    existing.push(mapping);
+    store.set(key, existing);
+    return store;
+  }, new Map<string, AgentMappingRow[]>());
   const metricsByTicketId = new Map(ticketMetrics.map((metric) => [metric.ticket_id, metric]));
   const activityDaysByAgent = new Set<string>();
   const store = new Map<
@@ -464,12 +534,12 @@ export async function recomputeComputedMetricsForDateRange({
   }
 
   for (const timesheet of timesheets) {
-    const agentMapping =
-      (timesheet.agent_mapping_id ? mappingById.get(timesheet.agent_mapping_id) : null) ??
-      (timesheet.payload?.connecteam_user_id
-        ? mappingByConnecteamUserId.get(`${timesheet.client_id}:${String(timesheet.payload.connecteam_user_id)}`)
-        : null) ??
-      null;
+    const agentMapping = resolveTimesheetAgentMapping(
+      timesheet,
+      mappingById,
+      mappingByScopedConnecteamUser,
+      mappingsByClientConnecteamUser
+    );
 
     if (!agentMapping) {
       continue;
