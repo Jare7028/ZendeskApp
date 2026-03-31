@@ -551,9 +551,10 @@ async function requireDashboardBuilderUser() {
 
 export async function loadDashboardBuilderConfig(): Promise<DashboardBuilderConfigRecord> {
   const context = await requireDashboardBuilderUser();
-  const supabase = createServerSupabaseClient().schema("app");
+  const supabase = createServerSupabaseClient();
 
   const { data, error } = await supabase
+    .schema("app")
     .from("dashboard_builder_configs")
     .select("user_id,version,config,created_at,updated_at")
     .eq("user_id", context.userId)
@@ -574,9 +575,10 @@ export async function loadDashboardBuilderConfig(): Promise<DashboardBuilderConf
 export async function saveDashboardBuilderConfig(config: unknown): Promise<DashboardBuilderConfigRecord> {
   const context = await requireDashboardBuilderUser();
   const normalizedConfig = normalizeDashboardBuilderConfig(config);
-  const supabase = createServerSupabaseClient().schema("app");
+  const supabase = createServerSupabaseClient();
 
   const { data, error } = await supabase
+    .schema("app")
     .from("dashboard_builder_configs")
     .upsert(
       {
