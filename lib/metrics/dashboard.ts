@@ -489,14 +489,14 @@ async function getComputedMetricsRows(options: {
     .select("client_id,metric_date,metric_key,dimension,metric_value")
     .in("client_id", options.clientIds)
     .gte("metric_date", options.startDate)
-    .lte("metric_date", options.endDate)
-    .contains("dimension", { scope: options.scope });
+    .lte("metric_date", options.endDate);
 
   if (options.agentId) {
     query = query.contains("dimension", {
-      scope: options.scope,
       agentMappingId: options.agentId
     });
+  } else {
+    query = query.contains("dimension", { scope: options.scope });
   }
 
   const { data, error } = await query;
