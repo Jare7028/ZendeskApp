@@ -10,7 +10,7 @@ export default function DashboardError({
 }) {
   return (
     <DashboardErrorState
-      description="The dashboard query failed. Retry after checking the current connections and sync state."
+      description="The dashboard builder could not load. Retry after checking the current session and persistence state."
       reset={reset}
       title="Dashboard unavailable"
     />
