@@ -226,7 +226,25 @@ function getClientConnecteamUserKey(clientId: string, connecteamUserId: string) 
   return `${clientId}:${connecteamUserId}`;
 }
 
-function resolveTimesheetAgentMapping(
+function readPayloadString(payload: JsonObject | null, key: string) {
+  const value = payload?.[key];
+
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return null;
+}
+
+function getActivityKey(agentMappingId: string, metricDate: string) {
+  return `${agentMappingId}:${metricDate}`;
+}
+
+function getTimesheetCandidateMappings(
   timesheet: TimesheetRow,
   mappingById: Map<string, AgentMappingRow>,
   mappingByScopedConnecteamUser: Map<string, AgentMappingRow>,
@@ -235,35 +253,97 @@ function resolveTimesheetAgentMapping(
   if (timesheet.agent_mapping_id) {
     const directMatch = mappingById.get(timesheet.agent_mapping_id);
     if (directMatch) {
-      return directMatch;
+      return [directMatch];
     }
   }
 
-  const connecteamUserId = timesheet.payload?.connecteam_user_id;
+  const connecteamUserId = readPayloadString(timesheet.payload, "connecteam_user_id");
   if (!connecteamUserId) {
-    return null;
+    return [];
   }
 
   const scopedMatch = mappingByScopedConnecteamUser.get(
-    getScopedConnecteamUserKey(timesheet.client_id, timesheet.connecteam_connection_id, String(connecteamUserId))
+    getScopedConnecteamUserKey(timesheet.client_id, timesheet.connecteam_connection_id, connecteamUserId)
   );
   if (scopedMatch) {
-    return scopedMatch;
+    return [scopedMatch];
   }
 
   const candidates =
-    mappingsByClientConnecteamUser.get(getClientConnecteamUserKey(timesheet.client_id, String(connecteamUserId))) ?? [];
+    mappingsByClientConnecteamUser.get(getClientConnecteamUserKey(timesheet.client_id, connecteamUserId)) ?? [];
 
-  if (timesheet.zendesk_connection_id) {
-    const zendeskScopedMatch = candidates.find(
-      (mapping) => mapping.zendesk_connection_id === timesheet.zendesk_connection_id
+  const zendeskConnectionId = timesheet.zendesk_connection_id ?? readPayloadString(timesheet.payload, "zendesk_connection_id");
+  if (zendeskConnectionId) {
+    const zendeskScopedMatches = candidates.filter(
+      (mapping) => mapping.zendesk_connection_id === zendeskConnectionId
     );
-    if (zendeskScopedMatch) {
-      return zendeskScopedMatch;
+    if (zendeskScopedMatches.length > 0) {
+      return zendeskScopedMatches;
     }
   }
 
-  return candidates.length === 1 ? candidates[0] : null;
+  return candidates;
+}
+
+function resolveTimesheetAllocations(
+  timesheet: TimesheetRow,
+  mappingById: Map<string, AgentMappingRow>,
+  mappingByScopedConnecteamUser: Map<string, AgentMappingRow>,
+  mappingsByClientConnecteamUser: Map<string, AgentMappingRow[]>,
+  interactionCountByAgentDay: Map<string, number>
+) {
+  const candidates = getTimesheetCandidateMappings(
+    timesheet,
+    mappingById,
+    mappingByScopedConnecteamUser,
+    mappingsByClientConnecteamUser
+  );
+
+  if (candidates.length === 0) {
+    return [] as Array<{ mapping: AgentMappingRow; minutesWorked: number }>;
+  }
+
+  if (candidates.length === 1) {
+    return [{ mapping: candidates[0], minutesWorked: timesheet.minutes_worked }];
+  }
+
+  const activeCandidates = candidates.filter(
+    (mapping) => (interactionCountByAgentDay.get(getActivityKey(mapping.id, timesheet.work_date)) ?? 0) > 0
+  );
+
+  if (activeCandidates.length === 1) {
+    return [{ mapping: activeCandidates[0], minutesWorked: timesheet.minutes_worked }];
+  }
+
+  if (activeCandidates.length === 0) {
+    return [];
+  }
+
+  const weightedCandidates = activeCandidates.map((mapping) => ({
+    mapping,
+    interactions: interactionCountByAgentDay.get(getActivityKey(mapping.id, timesheet.work_date)) ?? 0
+  }));
+  const totalInteractions = weightedCandidates.reduce((sum, entry) => sum + entry.interactions, 0);
+
+  if (totalInteractions <= 0) {
+    return [];
+  }
+
+  let remainingMinutes = timesheet.minutes_worked;
+
+  return weightedCandidates.map((entry, index) => {
+    const minutesWorked =
+      index === weightedCandidates.length - 1
+        ? remainingMinutes
+        : Number(((timesheet.minutes_worked * entry.interactions) / totalInteractions).toFixed(4));
+
+    remainingMinutes = Number((remainingMinutes - minutesWorked).toFixed(4));
+
+    return {
+      mapping: entry.mapping,
+      minutesWorked
+    };
+  });
 }
 
 function pushTicketMetrics(accumulator: Accumulator, metric: TicketMetricRow | null) {
@@ -513,6 +593,7 @@ export async function recomputeComputedMetricsForDateRange({
   }, new Map<string, AgentMappingRow[]>());
   const metricsByTicketId = new Map(ticketMetrics.map((metric) => [metric.ticket_id, metric]));
   const activityDaysByAgent = new Set<string>();
+  const interactionCountByAgentDay = new Map<string, number>();
   const store = new Map<
     string,
     { clientId: string; metricDate: string; dimension: MetricDimension; value: Accumulator }
@@ -542,7 +623,9 @@ export async function recomputeComputedMetricsForDateRange({
       continue;
     }
 
-    activityDaysByAgent.add(`${agentMapping.id}:${metricDate}`);
+    const activityKey = getActivityKey(agentMapping.id, metricDate);
+    activityDaysByAgent.add(activityKey);
+    interactionCountByAgentDay.set(activityKey, (interactionCountByAgentDay.get(activityKey) ?? 0) + 1);
     clientAccumulator.activeAgentIds.add(agentMapping.id);
     channelAccumulator.activeAgentIds.add(agentMapping.id);
 
@@ -565,33 +648,36 @@ export async function recomputeComputedMetricsForDateRange({
   }
 
   for (const timesheet of timesheets) {
-    const agentMapping = resolveTimesheetAgentMapping(
+    const allocations = resolveTimesheetAllocations(
       timesheet,
       mappingById,
       mappingByScopedConnecteamUser,
-      mappingsByClientConnecteamUser
+      mappingsByClientConnecteamUser,
+      interactionCountByAgentDay
     );
 
-    if (!agentMapping) {
+    if (allocations.length === 0) {
       continue;
     }
 
     const clientAccumulator = getAccumulator(store, timesheet.client_id, timesheet.work_date, { scope: "client" });
     clientAccumulator.totalMinutesWorked += timesheet.minutes_worked;
 
-    if (activityDaysByAgent.has(`${agentMapping.id}:${timesheet.work_date}`)) {
+    if (allocations.some(({ mapping }) => activityDaysByAgent.has(getActivityKey(mapping.id, timesheet.work_date)))) {
       clientAccumulator.activeMinutesWorked += timesheet.minutes_worked;
     }
 
-    const agentAccumulator = getAccumulator(store, timesheet.client_id, timesheet.work_date, {
-      scope: "agent",
-      agentMappingId: agentMapping.id,
-      agentName: agentMapping.display_name
-    });
-    agentAccumulator.totalMinutesWorked += timesheet.minutes_worked;
+    for (const allocation of allocations) {
+      const agentAccumulator = getAccumulator(store, timesheet.client_id, timesheet.work_date, {
+        scope: "agent",
+        agentMappingId: allocation.mapping.id,
+        agentName: allocation.mapping.display_name
+      });
+      agentAccumulator.totalMinutesWorked += allocation.minutesWorked;
 
-    if (activityDaysByAgent.has(`${agentMapping.id}:${timesheet.work_date}`)) {
-      agentAccumulator.activeMinutesWorked += timesheet.minutes_worked;
+      if (activityDaysByAgent.has(getActivityKey(allocation.mapping.id, timesheet.work_date))) {
+        agentAccumulator.activeMinutesWorked += allocation.minutesWorked;
+      }
     }
   }
 
