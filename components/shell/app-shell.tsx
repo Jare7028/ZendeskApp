@@ -13,7 +13,7 @@ export function AppShell({
 }) {
   return (
     <div className="min-h-screen px-4 py-4 sm:px-6 lg:px-8">
-      <div className="mx-auto grid min-h-[calc(100vh-2rem)] max-w-7xl gap-4 lg:grid-cols-[280px_1fr]">
+      <div className="grid min-h-[calc(100vh-2rem)] gap-4 lg:grid-cols-[280px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="rounded-[28px] border bg-card/90 p-5 shadow-panel">
           <div className="space-y-6">
             <div className="space-y-2">
