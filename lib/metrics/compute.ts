@@ -271,17 +271,6 @@ function getTimesheetCandidateMappings(
 
   const candidates =
     mappingsByClientConnecteamUser.get(getClientConnecteamUserKey(timesheet.client_id, connecteamUserId)) ?? [];
-
-  const zendeskConnectionId = timesheet.zendesk_connection_id ?? readPayloadString(timesheet.payload, "zendesk_connection_id");
-  if (zendeskConnectionId) {
-    const zendeskScopedMatches = candidates.filter(
-      (mapping) => mapping.zendesk_connection_id === zendeskConnectionId
-    );
-    if (zendeskScopedMatches.length > 0) {
-      return zendeskScopedMatches;
-    }
-  }
-
   return candidates;
 }
 
@@ -289,8 +278,7 @@ function resolveTimesheetAllocations(
   timesheet: TimesheetRow,
   mappingById: Map<string, AgentMappingRow>,
   mappingByScopedConnecteamUser: Map<string, AgentMappingRow>,
-  mappingsByClientConnecteamUser: Map<string, AgentMappingRow[]>,
-  interactionCountByAgentDay: Map<string, number>
+  mappingsByClientConnecteamUser: Map<string, AgentMappingRow[]>
 ) {
   const candidates = getTimesheetCandidateMappings(
     timesheet,
@@ -307,40 +295,19 @@ function resolveTimesheetAllocations(
     return [{ mapping: candidates[0], minutesWorked: timesheet.minutes_worked }];
   }
 
-  const activeCandidates = candidates.filter(
-    (mapping) => (interactionCountByAgentDay.get(getActivityKey(mapping.id, timesheet.work_date)) ?? 0) > 0
-  );
-
-  if (activeCandidates.length === 1) {
-    return [{ mapping: activeCandidates[0], minutesWorked: timesheet.minutes_worked }];
-  }
-
-  if (activeCandidates.length === 0) {
-    return [];
-  }
-
-  const weightedCandidates = activeCandidates.map((mapping) => ({
-    mapping,
-    interactions: interactionCountByAgentDay.get(getActivityKey(mapping.id, timesheet.work_date)) ?? 0
-  }));
-  const totalInteractions = weightedCandidates.reduce((sum, entry) => sum + entry.interactions, 0);
-
-  if (totalInteractions <= 0) {
-    return [];
-  }
-
   let remainingMinutes = timesheet.minutes_worked;
+  const evenSplitMinutes = Number((timesheet.minutes_worked / candidates.length).toFixed(4));
 
-  return weightedCandidates.map((entry, index) => {
+  return candidates.map((mapping, index) => {
     const minutesWorked =
-      index === weightedCandidates.length - 1
+      index === candidates.length - 1
         ? remainingMinutes
-        : Number(((timesheet.minutes_worked * entry.interactions) / totalInteractions).toFixed(4));
+        : evenSplitMinutes;
 
     remainingMinutes = Number((remainingMinutes - minutesWorked).toFixed(4));
 
     return {
-      mapping: entry.mapping,
+      mapping,
       minutesWorked
     };
   });
@@ -652,8 +619,7 @@ export async function recomputeComputedMetricsForDateRange({
       timesheet,
       mappingById,
       mappingByScopedConnecteamUser,
-      mappingsByClientConnecteamUser,
-      interactionCountByAgentDay
+      mappingsByClientConnecteamUser
     );
 
     if (allocations.length === 0) {
