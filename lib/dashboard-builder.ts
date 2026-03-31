@@ -2,7 +2,7 @@ import "server-only";
 
 import { getCurrentUserContext } from "@/lib/auth/session";
 import { type SortDirection, type TrendGranularity } from "@/lib/metrics/dashboard";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 export const DASHBOARD_BUILDER_VERSION = 1;
 const DASHBOARD_GRID_COLUMNS = 12;
@@ -551,10 +551,9 @@ async function requireDashboardBuilderUser() {
 
 export async function loadDashboardBuilderConfig(): Promise<DashboardBuilderConfigRecord> {
   const context = await requireDashboardBuilderUser();
-  const supabase = createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
 
   const { data, error } = await supabase
-    .schema("app")
     .from("dashboard_builder_configs")
     .select("user_id,version,config,created_at,updated_at")
     .eq("user_id", context.userId)
@@ -575,10 +574,9 @@ export async function loadDashboardBuilderConfig(): Promise<DashboardBuilderConf
 export async function saveDashboardBuilderConfig(config: unknown): Promise<DashboardBuilderConfigRecord> {
   const context = await requireDashboardBuilderUser();
   const normalizedConfig = normalizeDashboardBuilderConfig(config);
-  const supabase = createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient();
 
   const { data, error } = await supabase
-    .schema("app")
     .from("dashboard_builder_configs")
     .upsert(
       {
