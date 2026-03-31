@@ -16,6 +16,7 @@ type AgentMappingRow = {
 type TicketRow = {
   id: string;
   client_id: string;
+  agent_mapping_id: string | null;
   channel: string | null;
   created_at_source: string | null;
   raw_payload: JsonObject | null;
@@ -341,7 +342,7 @@ export async function recomputeComputedMetricsForDateRange({
       .in("client_id", clientIds),
     supabase
       .from("tickets")
-      .select("id,client_id,channel,created_at_source,raw_payload")
+      .select("id,client_id,agent_mapping_id,channel,created_at_source,raw_payload")
       .in("client_id", clientIds)
       .gte("created_at_source", `${startDate}T00:00:00.000Z`)
       .lte("created_at_source", `${endDate}T23:59:59.999Z`),
@@ -402,12 +403,12 @@ export async function recomputeComputedMetricsForDateRange({
   const mappingByZendeskAgentId = new Map(
     includedMappings
       .filter((mapping) => mapping.zendesk_agent_id)
-      .map((mapping) => [mapping.zendesk_agent_id as string, mapping])
+      .map((mapping) => [`${mapping.client_id}:${mapping.zendesk_agent_id as string}`, mapping])
   );
   const mappingByConnecteamUserId = new Map(
     includedMappings
       .filter((mapping) => mapping.connecteam_user_id)
-      .map((mapping) => [mapping.connecteam_user_id as string, mapping])
+      .map((mapping) => [`${mapping.client_id}:${mapping.connecteam_user_id as string}`, mapping])
   );
   const metricsByTicketId = new Map(ticketMetrics.map((metric) => [metric.ticket_id, metric]));
   const activityDaysByAgent = new Set<string>();
@@ -425,9 +426,10 @@ export async function recomputeComputedMetricsForDateRange({
     const channel = normalizeChannel(ticket.channel);
     const assigneeId = ticket.raw_payload?.assignee_id;
     const agentMapping =
-      assigneeId === null || assigneeId === undefined
+      (ticket.agent_mapping_id ? mappingById.get(ticket.agent_mapping_id) : null) ??
+      (assigneeId === null || assigneeId === undefined
         ? null
-        : mappingByZendeskAgentId.get(String(assigneeId)) ?? null;
+        : mappingByZendeskAgentId.get(`${ticket.client_id}:${String(assigneeId)}`) ?? null);
     const metric = metricsByTicketId.get(ticket.id) ?? null;
     const clientAccumulator = getAccumulator(store, ticket.client_id, metricDate, { scope: "client" });
     const channelAccumulator = getAccumulator(store, ticket.client_id, metricDate, { scope: "channel", channel });
@@ -465,7 +467,7 @@ export async function recomputeComputedMetricsForDateRange({
     const agentMapping =
       (timesheet.agent_mapping_id ? mappingById.get(timesheet.agent_mapping_id) : null) ??
       (timesheet.payload?.connecteam_user_id
-        ? mappingByConnecteamUserId.get(String(timesheet.payload.connecteam_user_id))
+        ? mappingByConnecteamUserId.get(`${timesheet.client_id}:${String(timesheet.payload.connecteam_user_id)}`)
         : null) ??
       null;
 
