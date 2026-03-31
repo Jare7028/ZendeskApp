@@ -5,18 +5,12 @@ function SkeletonBlock({ className }: { className: string }) {
 export default function DashboardLoading() {
   return (
     <div className="space-y-6">
-      <SkeletonBlock className="h-24 w-full" />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SkeletonBlock className="h-36 w-full" />
-        <SkeletonBlock className="h-36 w-full" />
-        <SkeletonBlock className="h-36 w-full" />
-        <SkeletonBlock className="h-36 w-full" />
+      <SkeletonBlock className="h-40 w-full rounded-[36px]" />
+      <SkeletonBlock className="h-28 w-full rounded-[28px]" />
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+        <SkeletonBlock className="h-[520px] w-full rounded-[28px]" />
+        <SkeletonBlock className="h-[520px] w-full rounded-[28px]" />
       </div>
-      <div className="grid gap-4 xl:grid-cols-2">
-        <SkeletonBlock className="h-60 w-full" />
-        <SkeletonBlock className="h-60 w-full" />
-      </div>
-      <SkeletonBlock className="h-72 w-full" />
     </div>
   );
 }
