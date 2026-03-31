@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -30,6 +30,7 @@ import {
   type DashboardBuilderConfigRecord,
   type DashboardMetricKey,
   type DashboardTab,
+  type DashboardTabDateRange,
   type DashboardTableColumnKey,
   type DashboardWidget,
   type DashboardWidgetType
@@ -126,6 +127,41 @@ const DASHBOARD_GRID_ROW_HEIGHT = 72;
 
 type LayoutDirection = "down" | "left" | "right" | "up";
 type LayoutDimension = "h" | "w";
+type TabRuntimeData = {
+  current: DashboardData;
+  previous: DashboardData | null;
+};
+
+function formatISODate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(date: Date, days: number) {
+  const copy = new Date(date);
+  copy.setUTCDate(copy.getUTCDate() + days);
+  return copy;
+}
+
+function buildDefaultTabDateRange(): DashboardTabDateRange {
+  const today = new Date();
+  return {
+    start: formatISODate(addDays(today, -27)),
+    end: formatISODate(today)
+  };
+}
+
+function normalizeDateRange(dateRange: DashboardTabDateRange): DashboardTabDateRange {
+  return dateRange.start <= dateRange.end
+    ? dateRange
+    : {
+        start: dateRange.end,
+        end: dateRange.start
+      };
+}
+
+function getDateRangeKey(dateRange: DashboardTabDateRange) {
+  return `${dateRange.start}:${dateRange.end}`;
+}
 
 function buildBuilderDashboardData(current: DashboardData, previous: DashboardData | null = null): BuilderDashboardData {
   const buildSnapshot = (data: DashboardData): BuilderOverviewSnapshot => ({
@@ -997,6 +1033,23 @@ async function saveConfig(config: DashboardBuilderConfig) {
   return (await response.json()) as DashboardBuilderConfigRecord;
 }
 
+async function loadTabData(dateRange: DashboardTabDateRange) {
+  const params = new URLSearchParams({
+    start: dateRange.start,
+    end: dateRange.end
+  });
+  const response = await fetch(`/api/dashboard-data?${params.toString()}`, {
+    headers: { accept: "application/json" }
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Failed to load dashboard data.");
+  }
+
+  return (await response.json()) as TabRuntimeData;
+}
+
 function BuilderCanvas({
   data,
   disabled,
@@ -1118,22 +1171,34 @@ function BuilderCanvas({
 }
 
 export function DashboardBuilderShell({
-  initialDashboardData,
+  initialTabData,
+  initialTabId,
   initialRecord,
-  previousDashboardData
 }: {
-  initialDashboardData: DashboardData;
+  initialTabData: TabRuntimeData;
+  initialTabId: string;
   initialRecord: DashboardBuilderConfigRecord;
-  previousDashboardData?: DashboardData | null;
 }) {
   const [record, setRecord] = useState(initialRecord);
   const [activeTabId, setActiveTabId] = useState(initialRecord.config.tabs[0]?.id ?? "");
   const [selectedWidgetId, setSelectedWidgetId] = useState(initialRecord.config.tabs[0]?.widgets[0]?.id ?? "");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [tabDataById, setTabDataById] = useState<Record<string, { key: string; value: TabRuntimeData }>>(() => ({
+    [initialTabId]: {
+      key: getDateRangeKey(initialRecord.config.tabs.find((tab) => tab.id === initialTabId)?.dateRange ?? buildDefaultTabDateRange()),
+      value: initialTabData
+    }
+  }));
+  const [isDataPending, setIsDataPending] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const activeTab = record.config.tabs.find((tab) => tab.id === activeTabId) ?? record.config.tabs[0];
   const selectedWidget = activeTab?.widgets.find((widget) => widget.id === selectedWidgetId) ?? activeTab?.widgets[0] ?? null;
+  const activeTabDataEntry = activeTab ? tabDataById[activeTab.id] : null;
+  const activeTabRangeKey = activeTab ? getDateRangeKey(activeTab.dateRange) : null;
+  const activeTabData =
+    activeTabDataEntry && activeTabRangeKey && activeTabDataEntry.key === activeTabRangeKey ? activeTabDataEntry.value : null;
 
   function persistConfig(nextConfig: DashboardBuilderConfig, nextActiveTabId: string, nextSelectedWidgetId = selectedWidgetId) {
     setRecord((current) => ({ ...current, config: nextConfig }));
@@ -1153,9 +1218,51 @@ export function DashboardBuilderShell({
     });
   }
 
+  useEffect(() => {
+    if (!activeTab || !activeTabRangeKey || (activeTabDataEntry && activeTabDataEntry.key === activeTabRangeKey)) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsDataPending(true);
+    setDataError(null);
+
+    void loadTabData(activeTab.dateRange)
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+
+        setTabDataById((current) => ({
+          ...current,
+          [activeTab.id]: {
+            key: activeTabRangeKey,
+            value: payload
+          }
+        }));
+      })
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+
+        setDataError(error instanceof Error ? error.message : "Failed to load dashboard data.");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsDataPending(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, activeTabDataEntry, activeTabRangeKey]);
+
   function handleAddTab() {
     const nextTab: DashboardTab = {
       description: null,
+      dateRange: activeTab?.dateRange ?? buildDefaultTabDateRange(),
       id: buildTabId(),
       title: buildTabTitle(record.config.tabs),
       widgets: []
@@ -1169,6 +1276,29 @@ export function DashboardBuilderShell({
       nextTab.id,
       ""
     );
+  }
+
+  function handleUpdateTabDateRange(tabId: string, nextDateRange: DashboardTabDateRange) {
+    const normalizedDateRange = normalizeDateRange(nextDateRange);
+
+    const nextConfig = {
+      ...record.config,
+      tabs: record.config.tabs.map((tab) =>
+        tab.id === tabId
+          ? {
+              ...tab,
+              dateRange: normalizedDateRange
+            }
+          : tab
+      )
+    } satisfies DashboardBuilderConfig;
+
+    setTabDataById((current) => {
+      const nextEntries = { ...current };
+      delete nextEntries[tabId];
+      return nextEntries;
+    });
+    persistConfig(nextConfig, tabId, tabId === activeTab?.id ? selectedWidget?.id ?? "" : selectedWidgetId);
   }
 
   function updateWidget(widgetId: string, updater: (widget: DashboardWidget) => DashboardWidget) {
@@ -1362,9 +1492,11 @@ export function DashboardBuilderShell({
       </section>
 
       <DashboardTabBar
+        activeTab={activeTab ?? null}
         activeTabId={activeTab.id}
-        disabled={isPending}
+        disabled={isPending || isDataPending}
         onAddTab={handleAddTab}
+        onUpdateDateRange={handleUpdateTabDateRange}
         onSelectTab={(tabId) => {
           setActiveTabId(tabId);
           const nextTab = record.config.tabs.find((tab) => tab.id === tabId);
@@ -1390,23 +1522,36 @@ export function DashboardBuilderShell({
             </div>
           </CardHeader>
           <CardContent>
-            <BuilderCanvas
-              data={initialDashboardData}
-              disabled={isPending}
-              onAddWidget={handleAddWidget}
-              onDeleteWidget={handleDeleteWidget}
-              onMoveWidget={handleMoveWidget}
-              onResizeWidget={handleResizeWidget}
-              onSelectWidget={setSelectedWidgetId}
-              previousData={previousDashboardData}
-              selectedWidgetId={selectedWidget?.id ?? ""}
-              tab={activeTab}
-            />
+            {activeTabData ? (
+              <BuilderCanvas
+                data={activeTabData.current}
+                disabled={isPending || isDataPending}
+                onAddWidget={handleAddWidget}
+                onDeleteWidget={handleDeleteWidget}
+                onMoveWidget={handleMoveWidget}
+                onResizeWidget={handleResizeWidget}
+                onSelectWidget={setSelectedWidgetId}
+                previousData={activeTabData.previous}
+                selectedWidgetId={selectedWidget?.id ?? ""}
+                tab={activeTab}
+              />
+            ) : (
+              <div className="flex min-h-[320px] items-center justify-center rounded-[28px] border border-dashed border-border/70 bg-muted/20 p-6 text-center">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-foreground">
+                    {isDataPending ? "Loading tab data" : "This tab has no data yet."}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {dataError ?? "The active tab range will render here once the dashboard data finishes loading."}
+                  </p>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
         <DashboardWidgetInspector
-          disabled={isPending}
+          disabled={isPending || isDataPending}
           onAddWidget={handleAddWidget}
           onChangeWidgetType={handleChangeWidgetType}
           onDeleteWidget={handleDeleteWidget}

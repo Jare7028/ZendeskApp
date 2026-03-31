@@ -1,21 +1,36 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { CalendarRange, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { type DashboardTab } from "@/lib/dashboard-builder";
 
+function formatDateLabel(value: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC"
+  }).format(new Date(`${value}T00:00:00.000Z`));
+}
+
 export function DashboardTabBar({
+  activeTab,
   activeTabId,
   disabled,
   onAddTab,
+  onUpdateDateRange,
   onSelectTab,
   tabs
 }: {
+  activeTab: DashboardTab | null;
   activeTabId: string;
   disabled: boolean;
   onAddTab: () => void;
+  onUpdateDateRange: (tabId: string, nextDateRange: DashboardTab["dateRange"]) => void;
   onSelectTab: (tabId: string) => void;
   tabs: DashboardTab[];
 }) {
@@ -52,10 +67,71 @@ export function DashboardTabBar({
               <p className={cn("mt-1 truncate text-xs", isActive ? "text-background/70" : "text-muted-foreground")}>
                 {tab.widgets.length === 1 ? "1 widget" : `${tab.widgets.length} widgets`}
               </p>
+              <p className={cn("mt-1 truncate text-[11px]", isActive ? "text-background/80" : "text-muted-foreground")}>
+                {formatDateLabel(tab.dateRange.start)} to {formatDateLabel(tab.dateRange.end)}
+              </p>
             </button>
           );
         })}
       </div>
+
+      {activeTab ? (
+        <div className="rounded-3xl border border-border/70 bg-muted/25 p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Tab date range</p>
+              <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-2 text-sm font-medium text-foreground">
+                <CalendarRange className="h-4 w-4 text-muted-foreground" />
+                <span>
+                  {formatDateLabel(activeTab.dateRange.start)} to {formatDateLabel(activeTab.dateRange.end)}
+                </span>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor={`${activeTab.id}-start`}>Start date</Label>
+                <Input
+                  disabled={disabled}
+                  id={`${activeTab.id}-start`}
+                  max={activeTab.dateRange.end}
+                  onChange={(event) => {
+                    if (!event.currentTarget.value) {
+                      return;
+                    }
+
+                    onUpdateDateRange(activeTab.id, {
+                      start: event.currentTarget.value,
+                      end: activeTab.dateRange.end
+                    });
+                  }}
+                  type="date"
+                  value={activeTab.dateRange.start}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={`${activeTab.id}-end`}>End date</Label>
+                <Input
+                  disabled={disabled}
+                  id={`${activeTab.id}-end`}
+                  min={activeTab.dateRange.start}
+                  onChange={(event) => {
+                    if (!event.currentTarget.value) {
+                      return;
+                    }
+
+                    onUpdateDateRange(activeTab.id, {
+                      start: activeTab.dateRange.start,
+                      end: event.currentTarget.value
+                    });
+                  }}
+                  type="date"
+                  value={activeTab.dateRange.end}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

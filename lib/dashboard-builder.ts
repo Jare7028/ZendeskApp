@@ -61,6 +61,11 @@ export type DashboardWidgetLayout = {
   minH?: number;
 };
 
+export type DashboardTabDateRange = {
+  start: string;
+  end: string;
+};
+
 export type DashboardWidgetBase = {
   id: string;
   title: string;
@@ -107,6 +112,7 @@ export type DashboardTab = {
   id: string;
   title: string;
   description: string | null;
+  dateRange: DashboardTabDateRange;
   widgets: DashboardWidget[];
 };
 
@@ -241,6 +247,28 @@ function asInteger(value: unknown, fallback: number, options?: { min?: number; m
   }
 
   return rounded;
+}
+
+function formatISODate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(date: Date, days: number) {
+  const copy = new Date(date);
+  copy.setUTCDate(copy.getUTCDate() + days);
+  return copy;
+}
+
+function isISODateString(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function buildDefaultTabDateRange(): DashboardTabDateRange {
+  const today = new Date();
+  return {
+    start: formatISODate(addDays(today, -27)),
+    end: formatISODate(today)
+  };
 }
 
 function asMetricKey(value: unknown, fallback: DashboardMetricKey): DashboardMetricKey {
@@ -403,6 +431,15 @@ function normalizeWidget(value: unknown, index: number): DashboardWidget {
   }
 }
 
+function normalizeTabDateRange(value: unknown): DashboardTabDateRange {
+  const dateRange = isRecord(value) ? value : {};
+  const fallback = buildDefaultTabDateRange();
+  const start = isISODateString(dateRange.start) ? dateRange.start : fallback.start;
+  const end = isISODateString(dateRange.end) ? dateRange.end : fallback.end;
+
+  return start <= end ? { start, end } : { start: end, end: start };
+}
+
 function normalizeTab(value: unknown, index: number): DashboardTab {
   const tab = isRecord(value) ? value : {};
   const widgetsValue = Array.isArray(tab.widgets) ? tab.widgets : [];
@@ -454,6 +491,7 @@ function normalizeTab(value: unknown, index: number): DashboardTab {
     id: asTrimmedString(tab.id, `tab-${index + 1}`),
     title: asTrimmedString(tab.title, index === 0 ? "Overview" : `Tab ${index + 1}`),
     description: asNullableTrimmedString(tab.description),
+    dateRange: normalizeTabDateRange(tab.dateRange),
     widgets: widgets
       .slice()
       .sort((left, right) => {
@@ -477,6 +515,7 @@ export function buildDefaultDashboardBuilderConfig(): DashboardBuilderConfig {
         id: "overview",
         title: "Overview",
         description: "Starter layout for the current operational dashboard views.",
+        dateRange: buildDefaultTabDateRange(),
         widgets: [
           {
             id: "tickets-created",
