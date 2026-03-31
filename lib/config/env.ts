@@ -65,3 +65,11 @@ export function getSlaAlertEmailToOverride() {
     .map((value) => value.trim())
     .filter(Boolean);
 }
+
+export function getOptionalSupabaseUrl() {
+  return process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || null;
+}
+
+export function getOptionalSupabaseAnonKey() {
+  return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || null;
+}

@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { getBaseUrl } from "@/lib/config/env";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { canCreateServerSupabaseClient, createServerSupabaseClient } from "@/lib/supabase/server";
 
 function buildRedirect(pathname: string, params: Record<string, string>) {
   const search = new URLSearchParams(params);
@@ -11,6 +11,10 @@ function buildRedirect(pathname: string, params: Record<string, string>) {
 }
 
 export async function loginAction(formData: FormData) {
+  if (!canCreateServerSupabaseClient()) {
+    redirect(buildRedirect("/login", { error: "Auth is not configured yet." }));
+  }
+
   const supabase = createServerSupabaseClient();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
@@ -25,6 +29,10 @@ export async function loginAction(formData: FormData) {
 }
 
 export async function signupAction(formData: FormData) {
+  if (!canCreateServerSupabaseClient()) {
+    redirect(buildRedirect("/signup", { error: "Auth is not configured yet." }));
+  }
+
   const supabase = createServerSupabaseClient();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
@@ -57,6 +65,10 @@ export async function signupAction(formData: FormData) {
 }
 
 export async function forgotPasswordAction(formData: FormData) {
+  if (!canCreateServerSupabaseClient()) {
+    redirect(buildRedirect("/forgot-password", { error: "Auth is not configured yet." }));
+  }
+
   const supabase = createServerSupabaseClient();
   const email = String(formData.get("email") ?? "").trim();
 
@@ -76,6 +88,10 @@ export async function forgotPasswordAction(formData: FormData) {
 }
 
 export async function resetPasswordAction(formData: FormData) {
+  if (!canCreateServerSupabaseClient()) {
+    redirect(buildRedirect("/reset-password", { error: "Auth is not configured yet." }));
+  }
+
   const supabase = createServerSupabaseClient();
   const password = String(formData.get("password") ?? "");
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
