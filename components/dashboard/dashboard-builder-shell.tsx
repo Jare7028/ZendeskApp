@@ -1,7 +1,18 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { LayoutGrid, LoaderCircle, PanelTop, Plus, Sparkles } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  LayoutGrid,
+  LoaderCircle,
+  Minus,
+  PanelTop,
+  Plus,
+  Sparkles
+} from "lucide-react";
 
 import { DashboardTabBar } from "@/components/dashboard/dashboard-tab-bar";
 import { DashboardWidgetInspector } from "@/components/dashboard/dashboard-widget-inspector";
@@ -108,6 +119,11 @@ type BuilderTableRow = {
 };
 
 const CHART_COLORS = ["#0f766e", "#d97706", "#0f4c81", "#7c6f64"] as const;
+const DASHBOARD_GRID_COLUMNS = 12;
+const DASHBOARD_GRID_ROW_HEIGHT = 72;
+
+type LayoutDirection = "down" | "left" | "right" | "up";
+type LayoutDimension = "h" | "w";
 
 function buildBuilderDashboardData(current: DashboardData, previous: DashboardData | null = null): BuilderDashboardData {
   const buildSnapshot = (data: DashboardData): BuilderOverviewSnapshot => ({
@@ -408,20 +424,175 @@ function buildLinePath(values: number[], width: number, height: number, maxValue
     .join(" ");
 }
 
+function sortWidgetsForCanvas(widgets: DashboardWidget[]) {
+  return widgets
+    .slice()
+    .sort((left, right) => {
+      if (left.layout.y !== right.layout.y) {
+        return left.layout.y - right.layout.y;
+      }
+      if (left.layout.x !== right.layout.x) {
+        return left.layout.x - right.layout.x;
+      }
+
+      return left.id.localeCompare(right.id, "en-GB");
+    });
+}
+
+function clampWidgetLayout(widget: DashboardWidget): DashboardWidget {
+  const minW = Math.min(widget.layout.minW ?? 2, DASHBOARD_GRID_COLUMNS);
+  const maxWidth = Math.max(minW, DASHBOARD_GRID_COLUMNS);
+  const width = Math.max(minW, Math.min(widget.layout.w, maxWidth));
+  const maxX = Math.max(0, DASHBOARD_GRID_COLUMNS - width);
+
+  return {
+    ...widget,
+    layout: {
+      ...widget.layout,
+      x: Math.max(0, Math.min(widget.layout.x, maxX)),
+      y: Math.max(0, widget.layout.y),
+      w: width,
+      h: Math.max(widget.layout.minH ?? 2, widget.layout.h)
+    }
+  };
+}
+
+function widgetsOverlap(left: DashboardWidget, right: DashboardWidget) {
+  return !(
+    left.layout.x + left.layout.w <= right.layout.x ||
+    right.layout.x + right.layout.w <= left.layout.x ||
+    left.layout.y + left.layout.h <= right.layout.y ||
+    right.layout.y + right.layout.h <= left.layout.y
+  );
+}
+
+function packWidgets(widgets: DashboardWidget[]) {
+  const placed: DashboardWidget[] = [];
+
+  for (const widget of sortWidgetsForCanvas(widgets).map(clampWidgetLayout)) {
+    const maxX = Math.max(0, DASHBOARD_GRID_COLUMNS - widget.layout.w);
+    const nextWidget = {
+      ...widget,
+      layout: {
+        ...widget.layout,
+        x: Math.min(widget.layout.x, maxX)
+      }
+    };
+
+    while (placed.some((placedWidget) => widgetsOverlap(nextWidget, placedWidget))) {
+      nextWidget.layout = {
+        ...nextWidget.layout,
+        y: nextWidget.layout.y + 1
+      };
+    }
+
+    placed.push(nextWidget);
+  }
+
+  return sortWidgetsForCanvas(placed);
+}
+
 function DashboardBuilderWidgetCard({
   isSelected,
+  onMove,
+  onResize,
   onSelect,
   widget,
   data,
   previousData
 }: {
   isSelected: boolean;
+  onMove: (direction: LayoutDirection) => void;
+  onResize: (dimension: LayoutDimension, delta: number) => void;
   onSelect: () => void;
   widget: DashboardWidget;
   data: DashboardData;
   previousData?: DashboardData | null;
 }) {
   const builderData = buildBuilderDashboardData(data, previousData ?? null);
+  const canShrinkWidth = widget.layout.w > (widget.layout.minW ?? 2);
+  const canShrinkHeight = widget.layout.h > (widget.layout.minH ?? 2);
+  const canGrowWidth = widget.layout.w < DASHBOARD_GRID_COLUMNS;
+  const canGrowHeight = widget.layout.h < 12;
+
+  const controls = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/95 p-1">
+        {([
+          ["up", ArrowUp, "Move up"],
+          ["left", ArrowLeft, "Move left"],
+          ["right", ArrowRight, "Move right"],
+          ["down", ArrowDown, "Move down"]
+        ] as const).map(([direction, Icon, label]) => (
+          <button
+            key={direction}
+            aria-label={label}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={(event) => {
+              event.stopPropagation();
+              onMove(direction);
+            }}
+            type="button"
+          >
+            <Icon className="h-4 w-4" />
+          </button>
+        ))}
+      </div>
+      <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/95 p-1">
+        <button
+          aria-label="Decrease width"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!canShrinkWidth}
+          onClick={(event) => {
+            event.stopPropagation();
+            onResize("w", -1);
+          }}
+          type="button"
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+        <span className="min-w-16 text-center text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          {widget.layout.w} x {widget.layout.h}
+        </span>
+        <button
+          aria-label="Increase width"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!canGrowWidth}
+          onClick={(event) => {
+            event.stopPropagation();
+            onResize("w", 1);
+          }}
+          type="button"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+        <button
+          aria-label="Decrease height"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!canShrinkHeight}
+          onClick={(event) => {
+            event.stopPropagation();
+            onResize("h", -1);
+          }}
+          type="button"
+        >
+          <ArrowDown className="h-4 w-4 rotate-90" />
+        </button>
+        <button
+          aria-label="Increase height"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!canGrowHeight}
+          onClick={(event) => {
+            event.stopPropagation();
+            onResize("h", 1);
+          }}
+          type="button"
+        >
+          <ArrowUp className="h-4 w-4 rotate-90" />
+        </button>
+      </div>
+    </div>
+  );
 
   if (widget.type === "kpi") {
     const currentValue = getMetricValue(builderData.current, widget.config.metricKey);
@@ -464,6 +635,7 @@ function DashboardBuilderWidgetCard({
             KPI
           </Badge>
         </div>
+        {isSelected ? <div className="mt-4">{controls}</div> : null}
         <div className="mt-4 flex items-center justify-between gap-3 text-sm">
           <span className="text-muted-foreground">{widget.description ?? "Current window"}</span>
           {delta ? <span className="font-medium text-foreground">{delta}</span> : null}
@@ -497,6 +669,7 @@ function DashboardBuilderWidgetCard({
           {widget.type === "line" ? "Line" : widget.type === "bar" ? "Bar" : "Table"}
         </Badge>
       </div>
+      {isSelected ? <div className="mt-4">{controls}</div> : null}
       <div className="mt-5 flex-1">
         {widget.type === "line" ? (
           <div className="space-y-4">
@@ -805,6 +978,8 @@ async function saveConfig(config: DashboardBuilderConfig) {
 function BuilderCanvas({
   data,
   onAddWidget,
+  onMoveWidget,
+  onResizeWidget,
   onSelectWidget,
   previousData,
   selectedWidgetId,
@@ -812,6 +987,8 @@ function BuilderCanvas({
 }: {
   data: DashboardData;
   onAddWidget: () => void;
+  onMoveWidget: (widgetId: string, direction: LayoutDirection) => void;
+  onResizeWidget: (widgetId: string, dimension: LayoutDimension, delta: number) => void;
   onSelectWidget: (widgetId: string) => void;
   previousData?: DashboardData | null;
   selectedWidgetId: string;
@@ -827,7 +1004,7 @@ function BuilderCanvas({
             </Badge>
             <CardTitle className="text-2xl">Start with a widget</CardTitle>
             <CardDescription className="max-w-xl">
-              Saved widgets render with live dashboard data here. Layout editing can stay for a later milestone.
+              Saved widgets render with live dashboard data here. Add cards, then move and resize them into a working dashboard layout.
             </CardDescription>
           </div>
           <button
@@ -852,8 +1029,8 @@ function BuilderCanvas({
           </div>
           <div className="rounded-3xl border border-dashed border-border/70 bg-muted/35 p-5">
             <Sparkles className="h-5 w-5 text-muted-foreground" />
-            <p className="mt-4 text-sm font-medium">Minimal by default</p>
-            <p className="mt-1 text-sm text-muted-foreground">The builder keeps the lighter shell without the old dense report layout.</p>
+            <p className="mt-4 text-sm font-medium">Layout controls included</p>
+            <p className="mt-1 text-sm text-muted-foreground">Use the canvas controls or inspector to move widgets and resize them on the grid.</p>
           </div>
         </CardContent>
       </Card>
@@ -861,17 +1038,51 @@ function BuilderCanvas({
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {tab.widgets.map((widget) => (
-        <DashboardBuilderWidgetCard
-          key={widget.id}
-          data={data}
-          isSelected={widget.id === selectedWidgetId}
-          onSelect={() => onSelectWidget(widget.id)}
-          previousData={previousData}
-          widget={widget}
-        />
-      ))}
+    <div className="space-y-4">
+      <div className="rounded-[28px] border border-dashed border-border/70 bg-muted/20 p-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <p className="text-sm text-muted-foreground">
+            Arrange widgets on a 12-column canvas. Selected cards expose move and resize controls.
+          </p>
+          <button
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-border bg-background px-4 text-sm font-medium transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            onClick={onAddWidget}
+            type="button"
+          >
+            <Plus className="h-4 w-4" />
+            Add widget
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto pb-2">
+        <div
+          className="grid min-w-[960px] gap-4"
+          style={{
+            gridAutoRows: `${DASHBOARD_GRID_ROW_HEIGHT}px`,
+            gridTemplateColumns: `repeat(${DASHBOARD_GRID_COLUMNS}, minmax(0, 1fr))`
+          }}
+        >
+          {tab.widgets.map((widget) => (
+            <div
+              key={widget.id}
+              style={{
+                gridColumn: `${widget.layout.x + 1} / span ${widget.layout.w}`,
+                gridRow: `${widget.layout.y + 1} / span ${widget.layout.h}`
+              }}
+            >
+              <DashboardBuilderWidgetCard
+                data={data}
+                isSelected={widget.id === selectedWidgetId}
+                onMove={(direction) => onMoveWidget(widget.id, direction)}
+                onResize={(dimension, delta) => onResizeWidget(widget.id, dimension, delta)}
+                onSelect={() => onSelectWidget(widget.id)}
+                previousData={previousData}
+                widget={widget}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -950,29 +1161,55 @@ export function DashboardBuilderShell({
     persistConfig(nextConfig, activeTab.id, widgetId);
   }
 
+  function updateActiveTabWidgets(
+    updater: (widgets: DashboardWidget[]) => DashboardWidget[],
+    nextSelectedWidgetId = selectedWidgetId
+  ) {
+    if (!activeTab) {
+      return;
+    }
+
+    const nextConfig = {
+      ...record.config,
+      tabs: record.config.tabs.map((tab) =>
+        tab.id === activeTab.id
+          ? {
+              ...tab,
+              widgets: packWidgets(updater(tab.widgets))
+            }
+          : tab
+      )
+    } satisfies DashboardBuilderConfig;
+
+    persistConfig(nextConfig, activeTab.id, nextSelectedWidgetId);
+  }
+
   function handleChangeWidgetType(widgetId: string, nextType: DashboardWidgetType) {
-    updateWidget(widgetId, (widget) => {
-      if (widget.type === nextType) {
-        return widget;
-      }
+    updateActiveTabWidgets(
+      (widgets) =>
+        widgets.map((widget, widgetIndex) => {
+          if (widget.id !== widgetId || widget.type === nextType) {
+            return widget;
+          }
 
-      const widgetIndex = activeTab.widgets.findIndex((entry) => entry.id === widget.id);
-      const currentTemplate = getWidgetTemplate(widget.type);
-      const nextTemplate = getWidgetTemplate(nextType);
-      const nextWidget = buildWidget(widget.id, widgetIndex, nextType);
+          const currentTemplate = getWidgetTemplate(widget.type);
+          const nextTemplate = getWidgetTemplate(nextType);
+          const nextWidget = buildWidget(widget.id, widgetIndex, nextType);
 
-      return {
-        ...nextWidget,
-        description: widget.description === currentTemplate.description ? nextTemplate.description : widget.description,
-        id: widget.id,
-        layout: {
-          ...nextWidget.layout,
-          x: widget.layout.x,
-          y: widget.layout.y
-        },
-        title: widget.title === currentTemplate.title ? nextTemplate.title : widget.title
-      };
-    });
+          return {
+            ...nextWidget,
+            description: widget.description === currentTemplate.description ? nextTemplate.description : widget.description,
+            id: widget.id,
+            layout: {
+              ...nextWidget.layout,
+              x: widget.layout.x,
+              y: widget.layout.y
+            },
+            title: widget.title === currentTemplate.title ? nextTemplate.title : widget.title
+          };
+        }),
+      widgetId
+    );
   }
 
   function handleAddWidget() {
@@ -983,19 +1220,74 @@ export function DashboardBuilderShell({
     const nextWidgetId = `${activeTab.id}-widget-${activeTab.widgets.length + 1}`;
     const nextWidget = buildWidget(nextWidgetId, activeTab.widgets.length, getNextWidgetType(activeTab.widgets.length));
 
-    const nextConfig = {
-      ...record.config,
-      tabs: record.config.tabs.map((tab) =>
-        tab.id === activeTab.id
-          ? {
-              ...tab,
-              widgets: [...tab.widgets, nextWidget]
-            }
-          : tab
-      )
-    } satisfies DashboardBuilderConfig;
+    updateActiveTabWidgets((widgets) => [...widgets, nextWidget], nextWidgetId);
+  }
 
-    persistConfig(nextConfig, activeTab.id, nextWidgetId);
+  function handleMoveWidget(widgetId: string, direction: LayoutDirection) {
+    updateActiveTabWidgets(
+      (widgets) =>
+        widgets.map((widget) => {
+          if (widget.id !== widgetId) {
+            return widget;
+          }
+
+          switch (direction) {
+            case "left":
+              return { ...widget, layout: { ...widget.layout, x: Math.max(0, widget.layout.x - 1) } };
+            case "right":
+              return {
+                ...widget,
+                layout: {
+                  ...widget.layout,
+                  x: Math.min(DASHBOARD_GRID_COLUMNS - widget.layout.w, widget.layout.x + 1)
+                }
+              };
+            case "up":
+              return { ...widget, layout: { ...widget.layout, y: Math.max(0, widget.layout.y - 1) } };
+            case "down":
+              return { ...widget, layout: { ...widget.layout, y: widget.layout.y + 1 } };
+            default:
+              return widget;
+          }
+        }),
+      widgetId
+    );
+  }
+
+  function handleResizeWidget(widgetId: string, dimension: LayoutDimension, delta: number) {
+    updateActiveTabWidgets(
+      (widgets) =>
+        widgets.map((widget) => {
+          if (widget.id !== widgetId) {
+            return widget;
+          }
+
+          if (dimension === "w") {
+            const minWidth = widget.layout.minW ?? 2;
+            const nextWidth = Math.max(minWidth, Math.min(DASHBOARD_GRID_COLUMNS, widget.layout.w + delta));
+
+            return {
+              ...widget,
+              layout: {
+                ...widget.layout,
+                w: nextWidth,
+                x: Math.min(widget.layout.x, DASHBOARD_GRID_COLUMNS - nextWidth)
+              }
+            };
+          }
+
+          const minHeight = widget.layout.minH ?? 2;
+
+          return {
+            ...widget,
+            layout: {
+              ...widget.layout,
+              h: Math.max(minHeight, Math.min(12, widget.layout.h + delta))
+            }
+          };
+        }),
+      widgetId
+    );
   }
 
   if (!activeTab) {
@@ -1012,7 +1304,7 @@ export function DashboardBuilderShell({
             </p>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight">Build dashboards tab by tab.</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              A lighter workspace for organizing tabs and staging widgets before richer builder controls arrive.
+              Organize each tab on a live grid, then persist the layout through the existing builder config.
             </p>
           </div>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -1054,6 +1346,8 @@ export function DashboardBuilderShell({
             <BuilderCanvas
               data={initialDashboardData}
               onAddWidget={handleAddWidget}
+              onMoveWidget={handleMoveWidget}
+              onResizeWidget={handleResizeWidget}
               onSelectWidget={setSelectedWidgetId}
               previousData={previousDashboardData}
               selectedWidgetId={selectedWidget?.id ?? ""}
@@ -1066,6 +1360,8 @@ export function DashboardBuilderShell({
           disabled={isPending}
           onAddWidget={handleAddWidget}
           onChangeWidgetType={handleChangeWidgetType}
+          onMoveWidget={handleMoveWidget}
+          onResizeWidget={handleResizeWidget}
           onSelectWidget={setSelectedWidgetId}
           onUpdateWidget={updateWidget}
           saveError={saveError}

@@ -5,6 +5,7 @@ import { type SortDirection, type TrendGranularity } from "@/lib/metrics/dashboa
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const DASHBOARD_BUILDER_VERSION = 1;
+const DASHBOARD_GRID_COLUMNS = 12;
 
 export const DASHBOARD_WIDGET_TYPES = ["kpi", "line", "bar", "table"] as const;
 export type DashboardWidgetType = (typeof DASHBOARD_WIDGET_TYPES)[number];
@@ -296,13 +297,15 @@ function asWidgetType(value: unknown, fallback: DashboardWidgetType): DashboardW
 
 function normalizeLayout(value: unknown): DashboardWidgetLayout {
   const layout = isRecord(value) ? value : {};
+  const width = asInteger(layout.w, 3, { min: 2, max: DASHBOARD_GRID_COLUMNS });
+  const x = asInteger(layout.x, 0, { min: 0, max: Math.max(0, DASHBOARD_GRID_COLUMNS - width) });
 
   return {
-    x: asInteger(layout.x, 0, { min: 0, max: 11 }),
+    x,
     y: asInteger(layout.y, 0, { min: 0 }),
-    w: asInteger(layout.w, 3, { min: 2, max: 12 }),
+    w: width,
     h: asInteger(layout.h, 3, { min: 2, max: 12 }),
-    minW: asInteger(layout.minW, 2, { min: 1, max: 12 }),
+    minW: asInteger(layout.minW, 2, { min: 1, max: DASHBOARD_GRID_COLUMNS }),
     minH: asInteger(layout.minH, 2, { min: 1, max: 12 })
   };
 }
@@ -401,12 +404,66 @@ function normalizeWidget(value: unknown, index: number): DashboardWidget {
 function normalizeTab(value: unknown, index: number): DashboardTab {
   const tab = isRecord(value) ? value : {};
   const widgetsValue = Array.isArray(tab.widgets) ? tab.widgets : [];
+  const widgets = widgetsValue.map((widget, widgetIndex) => normalizeWidget(widget, widgetIndex));
+  const occupied = new Set<string>();
+
+  const placeWidget = (widget: DashboardWidget) => {
+    const maxX = Math.max(0, DASHBOARD_GRID_COLUMNS - widget.layout.w);
+    const nextWidget = {
+      ...widget,
+      layout: {
+        ...widget.layout,
+        x: Math.min(widget.layout.x, maxX)
+      }
+    };
+
+    let y = Math.max(0, nextWidget.layout.y);
+
+    while (true) {
+      const collides = Array.from({ length: nextWidget.layout.w * nextWidget.layout.h }).some((_, cellIndex) => {
+        const rowOffset = Math.floor(cellIndex / nextWidget.layout.w);
+        const columnOffset = cellIndex % nextWidget.layout.w;
+        return occupied.has(`${nextWidget.layout.x + columnOffset}:${y + rowOffset}`);
+      });
+
+      if (!collides) {
+        break;
+      }
+
+      y += 1;
+    }
+
+    for (let rowOffset = 0; rowOffset < nextWidget.layout.h; rowOffset += 1) {
+      for (let columnOffset = 0; columnOffset < nextWidget.layout.w; columnOffset += 1) {
+        occupied.add(`${nextWidget.layout.x + columnOffset}:${y + rowOffset}`);
+      }
+    }
+
+    return {
+      ...nextWidget,
+      layout: {
+        ...nextWidget.layout,
+        y
+      }
+    };
+  };
 
   return {
     id: asTrimmedString(tab.id, `tab-${index + 1}`),
     title: asTrimmedString(tab.title, index === 0 ? "Overview" : `Tab ${index + 1}`),
     description: asNullableTrimmedString(tab.description),
-    widgets: widgetsValue.map((widget, widgetIndex) => normalizeWidget(widget, widgetIndex))
+    widgets: widgets
+      .slice()
+      .sort((left, right) => {
+        if (left.layout.y !== right.layout.y) {
+          return left.layout.y - right.layout.y;
+        }
+        if (left.layout.x !== right.layout.x) {
+          return left.layout.x - right.layout.x;
+        }
+        return left.id.localeCompare(right.id, "en-GB");
+      })
+      .map(placeWidget)
   };
 }
 
