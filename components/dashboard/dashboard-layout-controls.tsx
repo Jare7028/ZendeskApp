@@ -1,8 +1,5 @@
 "use client";
 
-import { Minus, Plus } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { type DashboardWidgetLayout } from "@/lib/dashboard-builder";
@@ -71,42 +68,24 @@ function LayoutField({
       <Label className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground" htmlFor={id}>
         {label}
       </Label>
-      <div className="grid grid-cols-[44px_minmax(0,1fr)_44px] gap-2">
-        <Button
-          disabled={disabled || currentValue <= minValue}
-          onClick={() => commit(currentValue - 1)}
-          type="button"
-          variant="outline"
-        >
-          <Minus className="h-4 w-4" />
-        </Button>
-        <Input
-          className="text-center"
-          defaultValue={String(currentValue)}
-          disabled={disabled}
-          id={id}
-          key={`${id}-${currentValue}-${maxValue}`}
-          max={maxValue}
-          min={minValue}
-          onBlur={(event) => {
-            commit(Number(event.currentTarget.value));
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.currentTarget.blur();
-            }
-          }}
-          type="number"
-        />
-        <Button
-          disabled={disabled || (typeof maxValue === "number" && currentValue >= maxValue)}
-          onClick={() => commit(currentValue + 1)}
-          type="button"
-          variant="outline"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
+      <Input
+        className="text-center"
+        defaultValue={String(currentValue)}
+        disabled={disabled}
+        id={id}
+        key={`${id}-${currentValue}-${maxValue}`}
+        max={maxValue}
+        min={minValue}
+        onBlur={(event) => {
+          commit(Number(event.currentTarget.value));
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+        type="number"
+      />
     </div>
   );
 }
