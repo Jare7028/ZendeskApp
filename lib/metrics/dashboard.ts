@@ -1593,7 +1593,7 @@ function buildTrendSet(rows: ComputedMetricRow[], granularity: TrendGranularity)
   };
 }
 
-async function ensureMetrics(clientIds: string[], startDate: string, endDate: string) {
+export async function ensureDashboardMetrics(clientIds: string[], startDate: string, endDate: string) {
   if (clientIds.length > 0) {
     await recomputeComputedMetricsForDateRange({
       clientIds,
@@ -1603,7 +1603,7 @@ async function ensureMetrics(clientIds: string[], startDate: string, endDate: st
   }
 }
 
-async function resolveDashboardScope(searchParams: DashboardSearchParams = {}): Promise<DashboardScope> {
+export async function resolveDashboardScope(searchParams: DashboardSearchParams = {}): Promise<DashboardScope> {
   const visibleClients = await getVisibleClients();
   const { startDate, endDate } = clampDateRange(searchParams.start, searchParams.end);
   const view = parseDashboardView(searchParams.view);
@@ -1649,7 +1649,7 @@ async function resolveDashboardScope(searchParams: DashboardSearchParams = {}): 
 
 export async function getDashboardData(
   searchParams: DashboardSearchParams = {},
-  options: { includeAdminAlerts?: boolean } = {}
+  options: { includeAdminAlerts?: boolean; skipEnsureMetrics?: boolean } = {}
 ): Promise<DashboardData> {
   const scope = await resolveDashboardScope(searchParams);
 
@@ -1683,7 +1683,9 @@ export async function getDashboardData(
     };
   }
 
-  await ensureMetrics(scope.scopedClientIds, scope.filters.startDate, scope.filters.endDate);
+  if (!options.skipEnsureMetrics) {
+    await ensureDashboardMetrics(scope.scopedClientIds, scope.filters.startDate, scope.filters.endDate);
+  }
 
   const [mainRows, agentRows, channelRows, clientRows, serviceRows, clientSlaConfigs] = await Promise.all([
     getComputedMetricsRows({
@@ -1801,7 +1803,7 @@ export async function getAgentDetailData(agentId: string, searchParams: Dashboar
     return null;
   }
 
-  await ensureMetrics([agent.clientId], baseScope.filters.startDate, baseScope.filters.endDate);
+  await ensureDashboardMetrics([agent.clientId], baseScope.filters.startDate, baseScope.filters.endDate);
 
   const [agentRows, peerAgentRows, clientRows, serviceRows, clientSlaConfigs] = await Promise.all([
     getComputedMetricsRows({
@@ -1895,7 +1897,7 @@ export async function getClientDetailData(clientId: string, searchParams: Dashbo
     return null;
   }
 
-  await ensureMetrics(
+  await ensureDashboardMetrics(
     baseScope.visibleClients.map((candidate) => candidate.id),
     baseScope.filters.startDate,
     baseScope.filters.endDate

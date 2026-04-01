@@ -1,7 +1,13 @@
 import "server-only";
 
 import { type DashboardTabDateRange, type DashboardTabHardFilters } from "@/lib/dashboard-builder";
-import { getDashboardData, type DashboardData, type DashboardSearchParams } from "@/lib/metrics/dashboard";
+import {
+  ensureDashboardMetrics,
+  getDashboardData,
+  resolveDashboardScope,
+  type DashboardData,
+  type DashboardSearchParams
+} from "@/lib/metrics/dashboard";
 
 type DashboardTabDataWindow = {
   current: DashboardData;
@@ -23,6 +29,26 @@ function addDays(date: Date, days: number) {
   return copy;
 }
 
+function buildDefaultTabDateRange(): DashboardTabDateRange {
+  const today = new Date();
+  return {
+    start: formatISODate(addDays(today, -27)),
+    end: formatISODate(today)
+  };
+}
+
+function isISODateString(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function normalizeTabDateRange(dateRange: DashboardTabDateRange): DashboardTabDateRange {
+  const fallback = buildDefaultTabDateRange();
+  const start = isISODateString(dateRange.start) ? dateRange.start : fallback.start;
+  const end = isISODateString(dateRange.end) ? dateRange.end : fallback.end;
+
+  return start <= end ? { start, end } : { start: end, end: start };
+}
+
 function buildDashboardSearchParams({ dateRange, hardFilters }: DashboardTabDataRequest): DashboardSearchParams {
   const params: DashboardSearchParams = {
     start: dateRange.start,
@@ -37,19 +63,30 @@ function buildDashboardSearchParams({ dateRange, hardFilters }: DashboardTabData
 }
 
 export async function loadDashboardTabData(request: DashboardTabDataRequest): Promise<DashboardTabDataWindow> {
-  const currentSearchParams = buildDashboardSearchParams(request);
-  const current = await getDashboardData(currentSearchParams);
-  const currentStart = new Date(`${current.filters.startDate}T00:00:00.000Z`);
-  const currentEnd = new Date(`${current.filters.endDate}T00:00:00.000Z`);
+  const normalizedDateRange = normalizeTabDateRange(request.dateRange);
+  const currentSearchParams = buildDashboardSearchParams({
+    ...request,
+    dateRange: normalizedDateRange
+  });
+  const currentStart = new Date(`${normalizedDateRange.start}T00:00:00.000Z`);
+  const currentEnd = new Date(`${normalizedDateRange.end}T00:00:00.000Z`);
   const rangeDays = Math.max(
     1,
     Math.round((currentEnd.getTime() - currentStart.getTime()) / (24 * 60 * 60 * 1000)) + 1
   );
-  const previous = await getDashboardData({
+  const previousSearchParams = {
     ...currentSearchParams,
     start: formatISODate(addDays(currentStart, -rangeDays)),
     end: formatISODate(addDays(currentStart, -1))
-  });
+  } satisfies DashboardSearchParams;
+  const scope = await resolveDashboardScope(currentSearchParams);
+
+  await ensureDashboardMetrics(scope.scopedClientIds, previousSearchParams.start ?? normalizedDateRange.start, normalizedDateRange.end);
+
+  const [current, previous] = await Promise.all([
+    getDashboardData(currentSearchParams, { skipEnsureMetrics: true }),
+    getDashboardData(previousSearchParams, { skipEnsureMetrics: true })
+  ]);
 
   return { current, previous };
 }

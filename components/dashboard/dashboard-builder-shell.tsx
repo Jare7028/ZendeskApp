@@ -1508,6 +1508,11 @@ export function DashboardBuilderShell({
     }
 
     const refreshKey = `${activeTab.id}:${activeTabDataKey}`;
+    if (activeTabDataEntry?.key === activeTabDataKey) {
+      refreshedTabKeysRef.current.add(refreshKey);
+      return;
+    }
+
     if (refreshedTabKeysRef.current.has(refreshKey)) {
       return;
     }
