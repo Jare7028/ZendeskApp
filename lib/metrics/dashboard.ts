@@ -58,6 +58,7 @@ type AgentOption = {
 };
 
 type ComputedMetricRow = {
+  id?: string;
   client_id: string;
   metric_date: string;
   metric_key: string;
@@ -485,28 +486,45 @@ async function getComputedMetricsRows(options: {
   }
 
   const supabase = createServerSupabaseClient().schema("app");
-  let query = supabase
-    .from("computed_metrics")
-    .select("client_id,metric_date,metric_key,dimension,metric_value")
-    .in("client_id", options.clientIds)
-    .gte("metric_date", options.startDate)
-    .lte("metric_date", options.endDate);
+  const pageSize = 1000;
+  const rows: ComputedMetricRow[] = [];
+  let from = 0;
 
-  if (options.agentId) {
-    query = query.contains("dimension", {
-      agentMappingId: options.agentId
-    });
-  } else {
-    query = query.contains("dimension", { scope: options.scope });
+  while (true) {
+    let query = supabase
+      .from("computed_metrics")
+      .select("id,client_id,metric_date,metric_key,dimension,metric_value")
+      .in("client_id", options.clientIds)
+      .gte("metric_date", options.startDate)
+      .lte("metric_date", options.endDate)
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (options.agentId) {
+      query = query.contains("dimension", {
+        agentMappingId: options.agentId
+      });
+    } else {
+      query = query.contains("dimension", { scope: options.scope });
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw error;
+    }
+
+    const batch = (data ?? []) as ComputedMetricRow[];
+    rows.push(...batch);
+
+    if (batch.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
   }
 
-  const { data, error } = await query;
-
-  if (error) {
-    throw error;
-  }
-
-  return (data ?? []) as ComputedMetricRow[];
+  return rows;
 }
 
 async function getClientSlaConfigs(clientIds: string[]) {
