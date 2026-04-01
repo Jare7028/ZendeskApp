@@ -1223,7 +1223,7 @@ export function DashboardBuilderShell({
   }
 
   useEffect(() => {
-    if (!activeTab || !activeTabRangeKey || (activeTabDataEntry && activeTabDataEntry.key === activeTabRangeKey)) {
+    if (!activeTab || !activeTabRangeKey) {
       return;
     }
 
