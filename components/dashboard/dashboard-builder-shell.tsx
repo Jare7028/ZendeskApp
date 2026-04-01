@@ -1786,12 +1786,14 @@ export function DashboardBuilderShell({
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Card className="bg-background/95">
           <CardContent>
-            <div className="mb-4 flex justify-end text-sm text-muted-foreground">
-              <div className="flex items-center gap-3">
-                {isPending || isDataPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-                <span>{isPending || isDataPending ? "Updating tab" : "Saved to your workspace"}</span>
+            {isPending || isDataPending ? (
+              <div className="mb-4 flex justify-end text-sm text-muted-foreground">
+                <div className="flex items-center gap-3">
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  <span>Updating tab</span>
+                </div>
               </div>
-            </div>
+            ) : null}
             {activeTabData ? (
               <BuilderCanvas
                 data={activeTabData.current}
