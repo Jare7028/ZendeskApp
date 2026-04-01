@@ -163,6 +163,10 @@ function getDateRangeKey(dateRange: DashboardTabDateRange) {
   return `${dateRange.start}:${dateRange.end}`;
 }
 
+function formatDateRangeLabel(dateRange: DashboardTabDateRange) {
+  return `${dateRange.start} to ${dateRange.end}`;
+}
+
 function buildBuilderDashboardData(current: DashboardData, previous: DashboardData | null = null): BuilderDashboardData {
   const buildSnapshot = (data: DashboardData): BuilderOverviewSnapshot => ({
     totalInteractions: data.overview.totalInteractions,
@@ -1521,7 +1525,7 @@ export function DashboardBuilderShell({
                   {activeTab.widgets.length === 1 ? "1 widget" : `${activeTab.widgets.length} widgets`}
                 </Badge>
                 <Badge className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-emerald-900">
-                  {activeTab.dateRange.start} to {activeTab.dateRange.end}
+                  Active window: {formatDateRangeLabel(activeTab.dateRange)}
                 </Badge>
               </div>
             </div>

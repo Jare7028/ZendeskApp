@@ -93,6 +93,14 @@ type ShiftTypeRow = {
   include_in_worked_hours: boolean;
 };
 
+type TimesheetMappingRow = {
+  id: string;
+  client_id: string;
+  zendesk_connection_id: string | null;
+  connecteam_user_id: string | null;
+  inclusion_status: AgentInclusionStatus;
+};
+
 const SYNC_LOCK_MINUTES = 15;
 const SHIFT_OVERLAP_DAYS = 3;
 const DEFAULT_FUTURE_WINDOW_DAYS = 90;
@@ -128,6 +136,18 @@ function maxIso(values: Array<string | null | undefined>) {
   }
 
   return new Date(Math.max(...timestamps)).toISOString();
+}
+
+function getScopedTimesheetMappingKey(
+  clientId: string,
+  zendeskConnectionId: string | null,
+  connecteamUserId: string
+) {
+  return `${clientId}:${zendeskConnectionId ?? "none"}:${connecteamUserId}`;
+}
+
+function getClientTimesheetMappingKey(clientId: string, connecteamUserId: string) {
+  return `${clientId}:${connecteamUserId}`;
 }
 
 function normalizeString(value: unknown) {
@@ -963,24 +983,63 @@ async function syncLegacyTimesheetData(
     return;
   }
 
-  const payload = rows.map((row) => ({
-    client_id: row.clientId,
-    zendesk_connection_id: row.zendeskConnectionId,
-    connecteam_connection_id: connection.id,
-    connecteam_timesheet_id: `schedule:${row.clientId}:${row.zendeskConnectionId ?? "none"}:${row.connecteamUserId}:${row.workDate}`,
-    work_date: row.workDate,
-    minutes_worked: row.scheduledMinutes,
-    billable_minutes: null,
-    payload: {
-      source: "scheduled_shift",
+  const { data: mappings, error: mappingsError } = await supabase
+    .from("agent_mappings")
+    .select("id,client_id,zendesk_connection_id,connecteam_user_id,inclusion_status")
+    .eq("connecteam_connection_id", connection.id)
+    .eq("inclusion_status", "mapped")
+    .not("connecteam_user_id", "is", null);
+
+  if (mappingsError) {
+    throw mappingsError;
+  }
+
+  const scopedMappingByUser = new Map<string, string>();
+  const clientMappingsByUser = new Map<string, string[]>();
+
+  for (const mapping of (mappings ?? []) as TimesheetMappingRow[]) {
+    if (!mapping.connecteam_user_id) {
+      continue;
+    }
+
+    scopedMappingByUser.set(
+      getScopedTimesheetMappingKey(mapping.client_id, mapping.zendesk_connection_id, mapping.connecteam_user_id),
+      mapping.id
+    );
+
+    const clientKey = getClientTimesheetMappingKey(mapping.client_id, mapping.connecteam_user_id);
+    const existing = clientMappingsByUser.get(clientKey) ?? [];
+    existing.push(mapping.id);
+    clientMappingsByUser.set(clientKey, existing);
+  }
+
+  const payload = rows.map((row) => {
+    const scopedKey = getScopedTimesheetMappingKey(row.clientId, row.zendeskConnectionId, row.connecteamUserId);
+    const clientKey = getClientTimesheetMappingKey(row.clientId, row.connecteamUserId);
+    const fallbackMappings = clientMappingsByUser.get(clientKey) ?? [];
+    const agentMappingId =
+      scopedMappingByUser.get(scopedKey) ?? (fallbackMappings.length === 1 ? fallbackMappings[0] : null);
+
+    return {
+      client_id: row.clientId,
       zendesk_connection_id: row.zendeskConnectionId,
-      connecteam_user_id: row.connecteamUserId,
+      connecteam_connection_id: connection.id,
+      agent_mapping_id: agentMappingId,
+      connecteam_timesheet_id: `schedule:${row.clientId}:${row.zendeskConnectionId ?? "none"}:${row.connecteamUserId}:${row.workDate}`,
       work_date: row.workDate,
-      scheduled_minutes: row.scheduledMinutes,
-      shift_count: row.shiftCount
-    },
-    recorded_at: isoNow()
-  }));
+      minutes_worked: row.scheduledMinutes,
+      billable_minutes: null,
+      payload: {
+        source: "scheduled_shift",
+        zendesk_connection_id: row.zendeskConnectionId,
+        connecteam_user_id: row.connecteamUserId,
+        work_date: row.workDate,
+        scheduled_minutes: row.scheduledMinutes,
+        shift_count: row.shiftCount
+      },
+      recorded_at: isoNow()
+    };
+  });
 
   const { error } = await supabase.from("timesheet_data").insert(payload);
   if (error) {
