@@ -1002,8 +1002,8 @@ function DashboardCanvasWidgetHandles({
       <button
         aria-label="Drag widget"
         className={cn(
-          "absolute left-3 right-3 top-3 z-20 inline-flex items-center justify-center gap-2 rounded-2xl border border-border/70 bg-background/95 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-foreground shadow-sm transition opacity-0 cursor-grab active:cursor-grabbing touch-none",
-          controlsVisible ? "opacity-100" : "group-hover:opacity-100"
+          "absolute left-3 right-3 top-3 z-20 inline-flex items-center justify-center gap-2 rounded-2xl border border-border/70 bg-background/95 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-foreground shadow-sm transition cursor-grab active:cursor-grabbing touch-none",
+          controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         disabled={disabled}
         onPointerDown={(event) => onStartInteraction(event, "move")}
@@ -1015,8 +1015,8 @@ function DashboardCanvasWidgetHandles({
       <button
         aria-label="Resize width"
         className={cn(
-          "absolute bottom-8 right-0 z-20 h-20 w-5 -translate-x-1/2 cursor-ew-resize rounded-full bg-transparent touch-none transition-opacity opacity-0",
-          controlsVisible ? "opacity-100" : "group-hover:opacity-100"
+          "absolute bottom-8 right-0 z-20 h-20 w-5 -translate-x-1/2 cursor-ew-resize rounded-full bg-transparent touch-none transition-opacity",
+          controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         disabled={disabled}
         onPointerDown={(event) => onStartInteraction(event, "resize-right")}
@@ -1027,8 +1027,8 @@ function DashboardCanvasWidgetHandles({
       <button
         aria-label="Resize height"
         className={cn(
-          "absolute bottom-0 right-8 z-20 h-5 w-20 -translate-y-1/2 cursor-ns-resize rounded-full bg-transparent touch-none transition-opacity opacity-0",
-          controlsVisible ? "opacity-100" : "group-hover:opacity-100"
+          "absolute bottom-0 right-8 z-20 h-5 w-20 -translate-y-1/2 cursor-ns-resize rounded-full bg-transparent touch-none transition-opacity",
+          controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         disabled={disabled}
         onPointerDown={(event) => onStartInteraction(event, "resize-bottom")}
@@ -1039,8 +1039,8 @@ function DashboardCanvasWidgetHandles({
       <button
         aria-label="Resize widget"
         className={cn(
-          "absolute bottom-2 right-2 z-20 h-6 w-6 cursor-nwse-resize rounded-full border border-foreground/30 bg-background/95 shadow-sm touch-none transition-opacity opacity-0",
-          controlsVisible ? "opacity-100" : "group-hover:opacity-100"
+          "absolute bottom-2 right-2 z-20 h-6 w-6 cursor-nwse-resize rounded-full border border-foreground/30 bg-background/95 shadow-sm touch-none transition-opacity",
+          controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         disabled={disabled}
         onPointerDown={(event) => onStartInteraction(event, "resize-corner")}
@@ -1158,6 +1158,7 @@ function BuilderCanvas({
   disabled,
   onAddWidget,
   onDeleteWidget,
+  onClearSelection,
   onSelectWidget,
   onUpdateWidgetLayout,
   previousData,
@@ -1168,6 +1169,7 @@ function BuilderCanvas({
   disabled: boolean;
   onAddWidget: () => void;
   onDeleteWidget: (widgetId: string) => void;
+  onClearSelection: () => void;
   onSelectWidget: (widgetId: string) => void;
   onUpdateWidgetLayout: (
     widgetId: string,
@@ -1180,7 +1182,7 @@ function BuilderCanvas({
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [activeInteraction, setActiveInteraction] = useState<CanvasInteraction | null>(null);
   const activeInteractionRef = useRef<CanvasInteraction | null>(null);
-  const selectedWidget = tab.widgets.find((widget) => widget.id === selectedWidgetId) ?? tab.widgets[0] ?? null;
+  const selectedWidget = tab.widgets.find((widget) => widget.id === selectedWidgetId) ?? null;
 
   function setInteraction(nextInteraction: CanvasInteraction | null) {
     activeInteractionRef.current = nextInteraction;
@@ -1381,6 +1383,11 @@ function BuilderCanvas({
         <div
           ref={canvasRef}
           className="grid min-w-[960px] gap-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              onClearSelection();
+            }
+          }}
           style={{
             gridAutoRows: `${DASHBOARD_GRID_ROW_HEIGHT}px`,
             gridTemplateColumns: `repeat(${DASHBOARD_GRID_COLUMNS}, minmax(0, 1fr))`
@@ -1447,7 +1454,7 @@ export function DashboardBuilderShell({
 }) {
   const [record, setRecord] = useState(initialRecord);
   const [activeTabId, setActiveTabId] = useState(initialRecord.config.tabs[0]?.id ?? "");
-  const [selectedWidgetId, setSelectedWidgetId] = useState(initialRecord.config.tabs[0]?.widgets[0]?.id ?? "");
+  const [selectedWidgetId, setSelectedWidgetId] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
   const [tabDataById, setTabDataById] = useState<Record<string, { key: string; value: TabRuntimeData }>>(() => ({
@@ -1467,7 +1474,7 @@ export function DashboardBuilderShell({
   const refreshedTabKeysRef = useRef(new Set<string>());
 
   const activeTab = record.config.tabs.find((tab) => tab.id === activeTabId) ?? record.config.tabs[0];
-  const selectedWidget = activeTab?.widgets.find((widget) => widget.id === selectedWidgetId) ?? activeTab?.widgets[0] ?? null;
+  const selectedWidget = activeTab?.widgets.find((widget) => widget.id === selectedWidgetId) ?? null;
   const activeTabDataEntry = activeTab ? tabDataById[activeTab.id] : null;
   const activeTabDataKey = activeTab ? getTabDataKey(activeTab) : null;
   const activeTabData =
@@ -1766,8 +1773,7 @@ export function DashboardBuilderShell({
         onUpdateDateRange={handleUpdateTabDateRange}
         onSelectTab={(tabId) => {
           setActiveTabId(tabId);
-          const nextTab = record.config.tabs.find((tab) => tab.id === tabId);
-          setSelectedWidgetId(nextTab?.widgets[0]?.id ?? "");
+          setSelectedWidgetId("");
         }}
         tabs={record.config.tabs}
       />
@@ -1802,11 +1808,12 @@ export function DashboardBuilderShell({
                 data={activeTabData.current}
                 disabled={isPending || isDataPending}
                 onAddWidget={handleAddWidget}
+                onClearSelection={() => setSelectedWidgetId("")}
                 onDeleteWidget={handleDeleteWidget}
                 onSelectWidget={setSelectedWidgetId}
                 onUpdateWidgetLayout={handleUpdateWidgetLayout}
                 previousData={activeTabData.previous}
-                selectedWidgetId={selectedWidget?.id ?? ""}
+                selectedWidgetId={selectedWidgetId}
                 tab={activeTab}
               />
             ) : (
