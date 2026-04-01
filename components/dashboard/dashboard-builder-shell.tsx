@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState, useTransition } from "react";
 import {
   LayoutGrid,
   LoaderCircle,
+  Move,
   PanelTop,
   Plus,
   Sparkles
@@ -120,6 +121,7 @@ type BuilderTableRow = {
 
 const CHART_COLORS = ["#0f766e", "#d97706", "#0f4c81", "#7c6f64"] as const;
 const DASHBOARD_GRID_COLUMNS = 12;
+const DASHBOARD_GRID_GAP = 16;
 const DASHBOARD_GRID_ROW_HEIGHT = 72;
 
 type TabRuntimeData = {
@@ -130,6 +132,18 @@ type TabRuntimeData = {
 type BuilderClientOption = {
   id: string;
   name: string;
+};
+
+type CanvasInteractionMode = "move" | "resize-bottom" | "resize-corner" | "resize-right";
+
+type CanvasInteraction = {
+  mode: CanvasInteractionMode;
+  originLayout: DashboardWidget["layout"];
+  pointerId: number;
+  previewLayout: DashboardWidget["layout"];
+  startClientX: number;
+  startClientY: number;
+  widgetId: string;
 };
 
 function formatISODate(date: Date) {
@@ -192,6 +206,83 @@ function formatClientScopeLabel(clientId: string, clients: BuilderClientOption[]
   }
 
   return clients.find((client) => client.id === clientId)?.name ?? "Selected client";
+}
+
+function areLayoutsEqual(left: DashboardWidget["layout"], right: DashboardWidget["layout"]) {
+  return left.x === right.x && left.y === right.y && left.w === right.w && left.h === right.h;
+}
+
+function getCanvasCursor(mode: CanvasInteractionMode) {
+  switch (mode) {
+    case "move":
+      return "grabbing";
+    case "resize-bottom":
+      return "ns-resize";
+    case "resize-right":
+      return "ew-resize";
+    case "resize-corner":
+      return "nwse-resize";
+    default:
+      return "default";
+  }
+}
+
+function getCanvasColumnWidth(canvas: HTMLDivElement) {
+  const width = canvas.getBoundingClientRect().width;
+  return Math.max(1, (width - DASHBOARD_GRID_GAP * (DASHBOARD_GRID_COLUMNS - 1)) / DASHBOARD_GRID_COLUMNS);
+}
+
+function clampPreviewLayout(layout: DashboardWidget["layout"]) {
+  const minW = Math.min(layout.minW ?? 2, DASHBOARD_GRID_COLUMNS);
+  const width = Math.max(minW, Math.min(layout.w, DASHBOARD_GRID_COLUMNS));
+  const maxX = Math.max(0, DASHBOARD_GRID_COLUMNS - width);
+
+  return {
+    ...layout,
+    x: Math.max(0, Math.min(layout.x, maxX)),
+    y: Math.max(0, layout.y),
+    w: width,
+    h: Math.max(layout.minH ?? 2, Math.min(layout.h, 12))
+  };
+}
+
+function buildPreviewLayoutFromPointerMove(
+  interaction: CanvasInteraction,
+  event: PointerEvent,
+  canvas: HTMLDivElement
+) {
+  const columnUnit = getCanvasColumnWidth(canvas) + DASHBOARD_GRID_GAP;
+  const rowUnit = DASHBOARD_GRID_ROW_HEIGHT + DASHBOARD_GRID_GAP;
+  const deltaColumns = Math.round((event.clientX - interaction.startClientX) / columnUnit);
+  const deltaRows = Math.round((event.clientY - interaction.startClientY) / rowUnit);
+  const nextLayout = { ...interaction.originLayout };
+
+  switch (interaction.mode) {
+    case "move":
+      nextLayout.x = interaction.originLayout.x + deltaColumns;
+      nextLayout.y = interaction.originLayout.y + deltaRows;
+      break;
+    case "resize-right":
+      nextLayout.w = Math.max(
+        interaction.originLayout.minW ?? 2,
+        Math.min(interaction.originLayout.w + deltaColumns, DASHBOARD_GRID_COLUMNS - interaction.originLayout.x)
+      );
+      break;
+    case "resize-bottom":
+      nextLayout.h = Math.max(interaction.originLayout.minH ?? 2, Math.min(interaction.originLayout.h + deltaRows, 12));
+      break;
+    case "resize-corner":
+      nextLayout.w = Math.max(
+        interaction.originLayout.minW ?? 2,
+        Math.min(interaction.originLayout.w + deltaColumns, DASHBOARD_GRID_COLUMNS - interaction.originLayout.x)
+      );
+      nextLayout.h = Math.max(interaction.originLayout.minH ?? 2, Math.min(interaction.originLayout.h + deltaRows, 12));
+      break;
+    default:
+      break;
+  }
+
+  return clampPreviewLayout(nextLayout);
 }
 
 function buildBuilderDashboardData(current: DashboardData, previous: DashboardData | null = null): BuilderDashboardData {
@@ -888,6 +979,80 @@ function DashboardBuilderWidgetCard({
   );
 }
 
+function DashboardCanvasWidgetHandles({
+  activeMode,
+  disabled,
+  isSelected,
+  onStartInteraction
+}: {
+  activeMode: CanvasInteractionMode | null;
+  disabled: boolean;
+  isSelected: boolean;
+  onStartInteraction: (event: ReactPointerEvent<HTMLButtonElement>, mode: CanvasInteractionMode) => void;
+}) {
+  const controlsVisible = isSelected || activeMode !== null;
+
+  return (
+    <>
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-0 rounded-[28px] border-2 transition",
+          controlsVisible ? "border-foreground/25" : "border-transparent"
+        )}
+      />
+      <button
+        aria-label="Drag widget"
+        className={cn(
+          "absolute left-3 top-3 z-20 inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/95 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-foreground shadow-sm transition opacity-0 cursor-grab active:cursor-grabbing touch-none",
+          controlsVisible ? "opacity-100" : "group-hover:opacity-100"
+        )}
+        disabled={disabled}
+        onPointerDown={(event) => onStartInteraction(event, "move")}
+        type="button"
+      >
+        <Move className="h-3.5 w-3.5" />
+        Drag
+      </button>
+      <button
+        aria-label="Resize width"
+        className={cn(
+          "absolute bottom-6 right-0 z-20 h-14 w-4 -translate-x-1/2 cursor-ew-resize rounded-full bg-transparent touch-none transition-opacity opacity-0",
+          controlsVisible ? "opacity-100" : "group-hover:opacity-100"
+        )}
+        disabled={disabled}
+        onPointerDown={(event) => onStartInteraction(event, "resize-right")}
+        type="button"
+      >
+        <span className="pointer-events-none absolute inset-y-1 left-1/2 w-1 -translate-x-1/2 rounded-full bg-foreground/25" />
+      </button>
+      <button
+        aria-label="Resize height"
+        className={cn(
+          "absolute bottom-0 right-6 z-20 h-4 w-14 -translate-y-1/2 cursor-ns-resize rounded-full bg-transparent touch-none transition-opacity opacity-0",
+          controlsVisible ? "opacity-100" : "group-hover:opacity-100"
+        )}
+        disabled={disabled}
+        onPointerDown={(event) => onStartInteraction(event, "resize-bottom")}
+        type="button"
+      >
+        <span className="pointer-events-none absolute inset-x-1 top-1/2 h-1 -translate-y-1/2 rounded-full bg-foreground/25" />
+      </button>
+      <button
+        aria-label="Resize widget"
+        className={cn(
+          "absolute bottom-2 right-2 z-20 h-5 w-5 cursor-nwse-resize rounded-full border border-foreground/20 bg-background/95 shadow-sm touch-none transition-opacity opacity-0",
+          controlsVisible ? "opacity-100" : "group-hover:opacity-100"
+        )}
+        disabled={disabled}
+        onPointerDown={(event) => onStartInteraction(event, "resize-corner")}
+        type="button"
+      >
+        <span className="pointer-events-none absolute bottom-[3px] right-[3px] h-2.5 w-2.5 rounded-full bg-foreground/30" />
+      </button>
+    </>
+  );
+}
+
 function buildTabId() {
   return `tab-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -1013,7 +1178,110 @@ function BuilderCanvas({
   selectedWidgetId: string;
   tab: DashboardTab;
 }) {
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [activeInteraction, setActiveInteraction] = useState<CanvasInteraction | null>(null);
+  const activeInteractionRef = useRef<CanvasInteraction | null>(null);
   const selectedWidget = tab.widgets.find((widget) => widget.id === selectedWidgetId) ?? tab.widgets[0] ?? null;
+  const selectedWidgetLayout =
+    selectedWidget && activeInteraction?.widgetId === selectedWidget.id ? activeInteraction.previewLayout : selectedWidget?.layout;
+
+  function setInteraction(nextInteraction: CanvasInteraction | null) {
+    activeInteractionRef.current = nextInteraction;
+    setActiveInteraction(nextInteraction);
+  }
+
+  function beginInteraction(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    widget: DashboardWidget,
+    mode: CanvasInteractionMode
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectWidget(widget.id);
+    setInteraction({
+      mode,
+      originLayout: { ...widget.layout },
+      pointerId: event.pointerId,
+      previewLayout: { ...widget.layout },
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      widgetId: widget.id
+    });
+  }
+
+  useEffect(() => {
+    if (!activeInteraction) {
+      return;
+    }
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = getCanvasCursor(activeInteraction.mode);
+    document.body.style.userSelect = "none";
+
+    function finishInteraction(event: PointerEvent, cancelled = false) {
+      const currentInteraction = activeInteractionRef.current;
+
+      if (!currentInteraction || event.pointerId !== currentInteraction.pointerId) {
+        return;
+      }
+
+      setInteraction(null);
+
+      if (!cancelled && !areLayoutsEqual(currentInteraction.originLayout, currentInteraction.previewLayout)) {
+        onUpdateWidgetLayout(currentInteraction.widgetId, {
+          h: currentInteraction.previewLayout.h,
+          w: currentInteraction.previewLayout.w,
+          x: currentInteraction.previewLayout.x,
+          y: currentInteraction.previewLayout.y
+        });
+      }
+    }
+
+    function handlePointerMove(event: PointerEvent) {
+      const currentInteraction = activeInteractionRef.current;
+      const canvas = canvasRef.current;
+
+      if (!currentInteraction || !canvas || event.pointerId !== currentInteraction.pointerId) {
+        return;
+      }
+
+      const nextPreviewLayout = buildPreviewLayoutFromPointerMove(currentInteraction, event, canvas);
+
+      if (!areLayoutsEqual(currentInteraction.previewLayout, nextPreviewLayout)) {
+        setInteraction({
+          ...currentInteraction,
+          previewLayout: nextPreviewLayout
+        });
+      }
+
+      event.preventDefault();
+    }
+
+    function handlePointerUp(event: PointerEvent) {
+      finishInteraction(event);
+    }
+
+    function handlePointerCancel(event: PointerEvent) {
+      finishInteraction(event, true);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [activeInteraction, onUpdateWidgetLayout]);
+
+  useEffect(() => {
+    setInteraction(null);
+  }, [tab.id]);
 
   if (tab.widgets.length === 0) {
     return (
@@ -1064,7 +1332,7 @@ function BuilderCanvas({
       <div className="rounded-[28px] border border-dashed border-border/70 bg-muted/20 p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <p className="text-sm text-muted-foreground">
-            Arrange widgets on a 12-column canvas. Use the selected-widget toolbar for precise layout changes.
+            Drag widgets by the handle, then resize them from the right edge, bottom edge, or corner. The toolbar below is still here for precise edits.
           </p>
           <button
             className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-border bg-background px-4 text-sm font-medium transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -1087,9 +1355,14 @@ function BuilderCanvas({
                 <Badge className="rounded-full border border-border/70 bg-background px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-foreground">
                   {formatWidgetTypeLabel(selectedWidget.type)}
                 </Badge>
+                {activeInteraction?.widgetId === selectedWidget.id ? (
+                  <Badge className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-amber-900">
+                    {activeInteraction.mode === "move" ? "Dragging" : "Resizing"}
+                  </Badge>
+                ) : null}
               </div>
               <p className="max-w-2xl text-sm text-muted-foreground">
-                Use exact grid values here instead of hunting across each card. If widgets overlap, the canvas repacks them downward automatically.
+                Direct manipulation snaps to the grid live. If widgets overlap when you release, the canvas repacks them downward automatically.
               </p>
             </div>
             <Button
@@ -1106,7 +1379,7 @@ function BuilderCanvas({
             <DashboardLayoutControls
               disabled={disabled}
               idPrefix={`canvas-${selectedWidget.id}`}
-              layout={selectedWidget.layout}
+              layout={selectedWidgetLayout ?? selectedWidget.layout}
               onUpdateLayout={(nextLayout) => onUpdateWidgetLayout(selectedWidget.id, nextLayout)}
             />
           </div>
@@ -1114,29 +1387,55 @@ function BuilderCanvas({
       ) : null}
       <div className="overflow-x-auto pb-2">
         <div
+          ref={canvasRef}
           className="grid min-w-[960px] gap-4"
           style={{
             gridAutoRows: `${DASHBOARD_GRID_ROW_HEIGHT}px`,
             gridTemplateColumns: `repeat(${DASHBOARD_GRID_COLUMNS}, minmax(0, 1fr))`
           }}
         >
-          {tab.widgets.map((widget) => (
-            <div
-              key={widget.id}
-              style={{
-                gridColumn: `${widget.layout.x + 1} / span ${widget.layout.w}`,
-                gridRow: `${widget.layout.y + 1} / span ${widget.layout.h}`
-              }}
-            >
-              <DashboardBuilderWidgetCard
-                data={data}
-                isSelected={widget.id === selectedWidgetId}
-                onSelect={() => onSelectWidget(widget.id)}
-                previousData={previousData}
-                widget={widget}
-              />
-            </div>
-          ))}
+          {tab.widgets.map((widget) => {
+            const previewLayout =
+              activeInteraction?.widgetId === widget.id ? activeInteraction.previewLayout : widget.layout;
+            const isSelected = widget.id === selectedWidgetId;
+
+            return (
+              <div
+                key={widget.id}
+                className={cn(
+                  "group relative",
+                  activeInteraction?.widgetId === widget.id ? "z-30" : isSelected ? "z-20" : "z-0"
+                )}
+                style={{
+                  gridColumn: `${previewLayout.x + 1} / span ${previewLayout.w}`,
+                  gridRow: `${previewLayout.y + 1} / span ${previewLayout.h}`
+                }}
+              >
+                <DashboardBuilderWidgetCard
+                  data={data}
+                  isSelected={isSelected}
+                  onSelect={() => onSelectWidget(widget.id)}
+                  previousData={previousData}
+                  widget={
+                    previewLayout === widget.layout
+                      ? widget
+                      : {
+                          ...widget,
+                          layout: previewLayout
+                        }
+                  }
+                />
+                {!disabled ? (
+                  <DashboardCanvasWidgetHandles
+                    activeMode={activeInteraction?.widgetId === widget.id ? activeInteraction.mode : null}
+                    disabled={disabled}
+                    isSelected={isSelected}
+                    onStartInteraction={(event, mode) => beginInteraction(event, widget, mode)}
+                  />
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
