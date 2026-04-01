@@ -15,8 +15,13 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const payload = await loadDashboardTabData({
-      start: url.searchParams.get("start") ?? "",
-      end: url.searchParams.get("end") ?? ""
+      dateRange: {
+        start: url.searchParams.get("start") ?? "",
+        end: url.searchParams.get("end") ?? ""
+      },
+      hardFilters: {
+        clientId: url.searchParams.get("client") ?? "all"
+      }
     });
 
     return NextResponse.json(payload);

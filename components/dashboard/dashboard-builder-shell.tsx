@@ -31,6 +31,7 @@ import {
   type DashboardMetricKey,
   type DashboardTab,
   type DashboardTabDateRange,
+  type DashboardTabHardFilters,
   type DashboardTableColumnKey,
   type DashboardWidget,
   type DashboardWidgetType
@@ -132,6 +133,11 @@ type TabRuntimeData = {
   previous: DashboardData | null;
 };
 
+type BuilderClientOption = {
+  id: string;
+  name: string;
+};
+
 function formatISODate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -163,8 +169,20 @@ function getDateRangeKey(dateRange: DashboardTabDateRange) {
   return `${dateRange.start}:${dateRange.end}`;
 }
 
+function getTabDataKey(tab: Pick<DashboardTab, "dateRange" | "hardFilters">) {
+  return `${getDateRangeKey(tab.dateRange)}:${tab.hardFilters.clientId}`;
+}
+
 function formatDateRangeLabel(dateRange: DashboardTabDateRange) {
   return `${dateRange.start} to ${dateRange.end}`;
+}
+
+function formatClientScopeLabel(clientId: string, clients: BuilderClientOption[]) {
+  if (clientId === "all") {
+    return "All permitted clients";
+  }
+
+  return clients.find((client) => client.id === clientId)?.name ?? "Selected client";
 }
 
 function buildBuilderDashboardData(current: DashboardData, previous: DashboardData | null = null): BuilderDashboardData {
@@ -1037,11 +1055,14 @@ async function saveConfig(config: DashboardBuilderConfig) {
   return (await response.json()) as DashboardBuilderConfigRecord;
 }
 
-async function loadTabData(dateRange: DashboardTabDateRange) {
+async function loadTabData(tab: Pick<DashboardTab, "dateRange" | "hardFilters">) {
   const params = new URLSearchParams({
-    start: dateRange.start,
-    end: dateRange.end
+    start: tab.dateRange.start,
+    end: tab.dateRange.end
   });
+  if (tab.hardFilters.clientId !== "all") {
+    params.set("client", tab.hardFilters.clientId);
+  }
   const response = await fetch(`/api/dashboard-data?${params.toString()}`, {
     headers: { accept: "application/json" }
   });
@@ -1175,10 +1196,12 @@ function BuilderCanvas({
 }
 
 export function DashboardBuilderShell({
+  availableClients,
   initialTabData,
   initialTabId,
   initialRecord,
 }: {
+  availableClients: BuilderClientOption[];
   initialTabData: TabRuntimeData;
   initialTabId: string;
   initialRecord: DashboardBuilderConfigRecord;
@@ -1190,20 +1213,37 @@ export function DashboardBuilderShell({
   const [dataError, setDataError] = useState<string | null>(null);
   const [tabDataById, setTabDataById] = useState<Record<string, { key: string; value: TabRuntimeData }>>(() => ({
     [initialTabId]: {
-      key: getDateRangeKey(initialRecord.config.tabs.find((tab) => tab.id === initialTabId)?.dateRange ?? buildDefaultTabDateRange()),
+      key:
+        getTabDataKey(
+          initialRecord.config.tabs.find((tab) => tab.id === initialTabId) ?? {
+            dateRange: buildDefaultTabDateRange(),
+            hardFilters: { clientId: "all" }
+          }
+        ),
       value: initialTabData
     }
   }));
   const [isDataPending, setIsDataPending] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const refreshedTabRangeKeysRef = useRef(new Set<string>());
+  const refreshedTabKeysRef = useRef(new Set<string>());
 
   const activeTab = record.config.tabs.find((tab) => tab.id === activeTabId) ?? record.config.tabs[0];
   const selectedWidget = activeTab?.widgets.find((widget) => widget.id === selectedWidgetId) ?? activeTab?.widgets[0] ?? null;
   const activeTabDataEntry = activeTab ? tabDataById[activeTab.id] : null;
-  const activeTabRangeKey = activeTab ? getDateRangeKey(activeTab.dateRange) : null;
+  const activeTabDataKey = activeTab ? getTabDataKey(activeTab) : null;
   const activeTabData =
-    activeTabDataEntry && activeTabRangeKey && activeTabDataEntry.key === activeTabRangeKey ? activeTabDataEntry.value : null;
+    activeTabDataEntry && activeTabDataKey && activeTabDataEntry.key === activeTabDataKey ? activeTabDataEntry.value : null;
+
+  function invalidateTabData(tabId: string) {
+    setTabDataById((current) => {
+      const nextEntries = { ...current };
+      delete nextEntries[tabId];
+      return nextEntries;
+    });
+    refreshedTabKeysRef.current = new Set(
+      [...refreshedTabKeysRef.current].filter((entry) => !entry.startsWith(`${tabId}:`))
+    );
+  }
 
   function persistConfig(nextConfig: DashboardBuilderConfig, nextActiveTabId: string, nextSelectedWidgetId = selectedWidgetId) {
     setRecord((current) => ({ ...current, config: nextConfig }));
@@ -1224,12 +1264,12 @@ export function DashboardBuilderShell({
   }
 
   useEffect(() => {
-    if (!activeTab || !activeTabRangeKey) {
+    if (!activeTab || !activeTabDataKey) {
       return;
     }
 
-    const refreshKey = `${activeTab.id}:${activeTabRangeKey}`;
-    if (refreshedTabRangeKeysRef.current.has(refreshKey)) {
+    const refreshKey = `${activeTab.id}:${activeTabDataKey}`;
+    if (refreshedTabKeysRef.current.has(refreshKey)) {
       return;
     }
 
@@ -1237,7 +1277,7 @@ export function DashboardBuilderShell({
     setIsDataPending(true);
     setDataError(null);
 
-    void loadTabData(activeTab.dateRange)
+    void loadTabData(activeTab)
       .then((payload) => {
         if (cancelled) {
           return;
@@ -1246,11 +1286,11 @@ export function DashboardBuilderShell({
         setTabDataById((current) => ({
           ...current,
           [activeTab.id]: {
-            key: activeTabRangeKey,
+            key: activeTabDataKey,
             value: payload
           }
         }));
-        refreshedTabRangeKeysRef.current.add(refreshKey);
+        refreshedTabKeysRef.current.add(refreshKey);
       })
       .catch((error: unknown) => {
         if (cancelled) {
@@ -1268,12 +1308,13 @@ export function DashboardBuilderShell({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, activeTabDataEntry, activeTabRangeKey]);
+  }, [activeTab, activeTabDataEntry, activeTabDataKey]);
 
   function handleAddTab() {
     const nextTab: DashboardTab = {
       description: null,
       dateRange: activeTab?.dateRange ?? buildDefaultTabDateRange(),
+      hardFilters: activeTab?.hardFilters ?? { clientId: "all" },
       id: buildTabId(),
       title: buildTabTitle(record.config.tabs),
       widgets: []
@@ -1304,11 +1345,24 @@ export function DashboardBuilderShell({
       )
     } satisfies DashboardBuilderConfig;
 
-    setTabDataById((current) => {
-      const nextEntries = { ...current };
-      delete nextEntries[tabId];
-      return nextEntries;
-    });
+    invalidateTabData(tabId);
+    persistConfig(nextConfig, tabId, tabId === activeTab?.id ? selectedWidget?.id ?? "" : selectedWidgetId);
+  }
+
+  function handleUpdateTabHardFilters(tabId: string, nextHardFilters: DashboardTabHardFilters) {
+    const nextConfig = {
+      ...record.config,
+      tabs: record.config.tabs.map((tab) =>
+        tab.id === tabId
+          ? {
+              ...tab,
+              hardFilters: nextHardFilters
+            }
+          : tab
+      )
+    } satisfies DashboardBuilderConfig;
+
+    invalidateTabData(tabId);
     persistConfig(nextConfig, tabId, tabId === activeTab?.id ? selectedWidget?.id ?? "" : selectedWidgetId);
   }
 
@@ -1505,8 +1559,10 @@ export function DashboardBuilderShell({
       <DashboardTabBar
         activeTab={activeTab ?? null}
         activeTabId={activeTab.id}
+        clients={availableClients}
         disabled={isPending || isDataPending}
         onAddTab={handleAddTab}
+        onUpdateHardFilters={handleUpdateTabHardFilters}
         onUpdateDateRange={handleUpdateTabDateRange}
         onSelectTab={(tabId) => {
           setActiveTabId(tabId);
@@ -1533,6 +1589,9 @@ export function DashboardBuilderShell({
                 </Badge>
                 <Badge className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-emerald-900">
                   Active window: {formatDateRangeLabel(activeTab.dateRange)}
+                </Badge>
+                <Badge className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-sky-900">
+                  Hard client filter: {formatClientScopeLabel(activeTab.hardFilters.clientId, availableClients)}
                 </Badge>
               </div>
             </div>

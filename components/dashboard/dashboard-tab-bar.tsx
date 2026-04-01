@@ -1,12 +1,12 @@
 "use client";
 
-import { CalendarRange, Plus } from "lucide-react";
+import { CalendarRange, Filter, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { type DashboardTab } from "@/lib/dashboard-builder";
+import { type DashboardTab, type DashboardTabHardFilters } from "@/lib/dashboard-builder";
 
 function formatDateLabel(value: string) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -17,19 +17,31 @@ function formatDateLabel(value: string) {
   }).format(new Date(`${value}T00:00:00.000Z`));
 }
 
+function formatClientScopeLabel(clientId: string, clients: Array<{ id: string; name: string }>) {
+  if (clientId === "all") {
+    return "All permitted clients";
+  }
+
+  return clients.find((client) => client.id === clientId)?.name ?? "Selected client";
+}
+
 export function DashboardTabBar({
   activeTab,
   activeTabId,
+  clients,
   disabled,
   onAddTab,
+  onUpdateHardFilters,
   onUpdateDateRange,
   onSelectTab,
   tabs
 }: {
   activeTab: DashboardTab | null;
   activeTabId: string;
+  clients: Array<{ id: string; name: string }>;
   disabled: boolean;
   onAddTab: () => void;
+  onUpdateHardFilters: (tabId: string, nextHardFilters: DashboardTabHardFilters) => void;
   onUpdateDateRange: (tabId: string, nextDateRange: DashboardTab["dateRange"]) => void;
   onSelectTab: (tabId: string) => void;
   tabs: DashboardTab[];
@@ -70,6 +82,9 @@ export function DashboardTabBar({
               <p className={cn("mt-1 truncate text-[11px]", isActive ? "text-background/80" : "text-muted-foreground")}>
                 {formatDateLabel(tab.dateRange.start)} to {formatDateLabel(tab.dateRange.end)}
               </p>
+              <p className={cn("mt-1 truncate text-[11px]", isActive ? "text-background/80" : "text-muted-foreground")}>
+                {formatClientScopeLabel(tab.hardFilters.clientId, clients)}
+              </p>
             </button>
           );
         })}
@@ -79,15 +94,21 @@ export function DashboardTabBar({
         <div className="rounded-3xl border border-border/70 bg-muted/25 p-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Tab date range</p>
-              <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-2 text-sm font-medium text-foreground">
-                <CalendarRange className="h-4 w-4 text-muted-foreground" />
-                <span>
-                  {formatDateLabel(activeTab.dateRange.start)} to {formatDateLabel(activeTab.dateRange.end)}
-                </span>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Tab scope</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-2 text-sm font-medium text-foreground">
+                  <CalendarRange className="h-4 w-4 text-muted-foreground" />
+                  <span>
+                    {formatDateLabel(activeTab.dateRange.start)} to {formatDateLabel(activeTab.dateRange.end)}
+                  </span>
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background px-3 py-2 text-sm font-medium text-foreground">
+                  <Filter className="h-4 w-4 text-muted-foreground" />
+                  <span>{formatClientScopeLabel(activeTab.hardFilters.clientId, clients)}</span>
+                </div>
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor={`${activeTab.id}-start`}>Start date</Label>
                 <Input
@@ -127,6 +148,27 @@ export function DashboardTabBar({
                   type="date"
                   value={activeTab.dateRange.end}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={`${activeTab.id}-client-filter`}>Hard client filter</Label>
+                <select
+                  className="flex h-10 w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                  disabled={disabled}
+                  id={`${activeTab.id}-client-filter`}
+                  onChange={(event) => {
+                    onUpdateHardFilters(activeTab.id, {
+                      clientId: event.currentTarget.value
+                    });
+                  }}
+                  value={activeTab.hardFilters.clientId}
+                >
+                  <option value="all">All permitted clients</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

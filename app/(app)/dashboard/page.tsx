@@ -14,7 +14,12 @@ export default async function DashboardPage() {
 
   const record = await loadDashboardBuilderConfig();
   const initialTab = record.config.tabs[0];
-  const initialData = initialTab ? await loadDashboardTabData(initialTab.dateRange) : null;
+  const initialData = initialTab
+    ? await loadDashboardTabData({
+        dateRange: initialTab.dateRange,
+        hardFilters: initialTab.hardFilters
+      })
+    : null;
 
   if (!initialTab || !initialData) {
     redirect("/login");
@@ -22,6 +27,7 @@ export default async function DashboardPage() {
 
   return (
     <DashboardBuilderShell
+      availableClients={initialData.current.visibleClients.map((client) => ({ id: client.id, name: client.name }))}
       initialTabData={initialData}
       initialTabId={initialTab.id}
       initialRecord={record}

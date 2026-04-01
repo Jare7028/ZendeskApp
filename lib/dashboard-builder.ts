@@ -66,6 +66,10 @@ export type DashboardTabDateRange = {
   end: string;
 };
 
+export type DashboardTabHardFilters = {
+  clientId: string;
+};
+
 export type DashboardWidgetBase = {
   id: string;
   title: string;
@@ -113,6 +117,7 @@ export type DashboardTab = {
   title: string;
   description: string | null;
   dateRange: DashboardTabDateRange;
+  hardFilters: DashboardTabHardFilters;
   widgets: DashboardWidget[];
 };
 
@@ -440,6 +445,14 @@ function normalizeTabDateRange(value: unknown): DashboardTabDateRange {
   return start <= end ? { start, end } : { start: end, end: start };
 }
 
+function normalizeTabHardFilters(value: unknown): DashboardTabHardFilters {
+  const hardFilters = isRecord(value) ? value : {};
+
+  return {
+    clientId: asTrimmedString(hardFilters.clientId, "all")
+  };
+}
+
 function normalizeTab(value: unknown, index: number): DashboardTab {
   const tab = isRecord(value) ? value : {};
   const widgetsValue = Array.isArray(tab.widgets) ? tab.widgets : [];
@@ -492,6 +505,7 @@ function normalizeTab(value: unknown, index: number): DashboardTab {
     title: asTrimmedString(tab.title, index === 0 ? "Overview" : `Tab ${index + 1}`),
     description: asNullableTrimmedString(tab.description),
     dateRange: normalizeTabDateRange(tab.dateRange),
+    hardFilters: normalizeTabHardFilters(tab.hardFilters),
     widgets: widgets
       .slice()
       .sort((left, right) => {
@@ -516,6 +530,7 @@ export function buildDefaultDashboardBuilderConfig(): DashboardBuilderConfig {
         title: "Overview",
         description: "Starter layout for the current operational dashboard views.",
         dateRange: buildDefaultTabDateRange(),
+        hardFilters: { clientId: "all" },
         widgets: [
           {
             id: "tickets-created",
