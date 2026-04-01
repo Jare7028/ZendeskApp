@@ -182,10 +182,6 @@ function getTabDataKey(tab: Pick<DashboardTab, "dateRange" | "hardFilters">) {
   return `${getDateRangeKey(tab.dateRange)}:${tab.hardFilters.clientId}`;
 }
 
-function formatDateRangeLabel(dateRange: DashboardTabDateRange) {
-  return `${dateRange.start} to ${dateRange.end}`;
-}
-
 function formatWidgetTypeLabel(type: DashboardWidgetType) {
   switch (type) {
     case "kpi":
@@ -199,14 +195,6 @@ function formatWidgetTypeLabel(type: DashboardWidgetType) {
     default:
       return "Widget";
   }
-}
-
-function formatClientScopeLabel(clientId: string, clients: BuilderClientOption[]) {
-  if (clientId === "all") {
-    return "All permitted clients";
-  }
-
-  return clients.find((client) => client.id === clientId)?.name ?? "Selected client";
 }
 
 function areLayoutsEqual(left: DashboardWidget["layout"], right: DashboardWidget["layout"]) {
@@ -1799,17 +1787,8 @@ export function DashboardBuilderShell({
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Card className="bg-background/95">
           <CardContent>
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              <Badge className="rounded-full border border-border/70 bg-background px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-foreground">
-                {activeTab.widgets.length === 1 ? "1 widget" : `${activeTab.widgets.length} widgets`}
-              </Badge>
-              <Badge className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-emerald-900">
-                Active window: {formatDateRangeLabel(activeTab.dateRange)}
-              </Badge>
-              <Badge className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-sky-900">
-                Hard client filter: {formatClientScopeLabel(activeTab.hardFilters.clientId, availableClients)}
-              </Badge>
-              <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">
+            <div className="mb-4 flex justify-end text-sm text-muted-foreground">
+              <div className="flex items-center gap-3">
                 {isPending || isDataPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
                 <span>{isPending || isDataPending ? "Updating tab" : "Saved to your workspace"}</span>
               </div>
