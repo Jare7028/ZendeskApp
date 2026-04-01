@@ -1365,41 +1365,6 @@ function BuilderCanvas({
 
   return (
     <div className="space-y-4">
-      {selectedWidget ? (
-        <div className="rounded-[28px] border border-border/70 bg-background p-4 shadow-sm">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Selected widget</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-lg font-semibold tracking-tight text-foreground">{selectedWidget.title}</p>
-                <Badge className="rounded-full border border-border/70 bg-background px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-foreground">
-                  {formatWidgetTypeLabel(selectedWidget.type)}
-                </Badge>
-                {activeInteraction?.widgetId === selectedWidget.id ? (
-                  <Badge className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-amber-900">
-                    {activeInteraction.mode === "move" ? "Dragging" : "Resizing"}
-                  </Badge>
-                ) : null}
-              </div>
-              <p className="max-w-2xl text-sm text-muted-foreground">
-                Direct manipulation snaps to the grid live. If widgets overlap when you release, the canvas repacks them downward automatically.
-              </p>
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                Use the canvas handles to move and resize. The inspector is just the fallback for exact numbers.
-              </p>
-            </div>
-            <Button
-              className="border-rose-200 text-rose-700 hover:bg-rose-50"
-              disabled={disabled}
-              onClick={() => onDeleteWidget(selectedWidget.id)}
-              type="button"
-              variant="outline"
-            >
-              Remove widget
-            </Button>
-          </div>
-        </div>
-      ) : null}
       <div className="overflow-x-auto pb-2">
         <div
           ref={canvasRef}
