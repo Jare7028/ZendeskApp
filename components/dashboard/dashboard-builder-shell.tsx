@@ -1377,22 +1377,6 @@ function BuilderCanvas({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-[28px] border border-dashed border-border/70 bg-muted/20 p-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <p className="text-sm text-muted-foreground">
-            Drag widgets by the handle, then resize them from the right edge, bottom edge, or corner. The toolbar below is still here for precise edits.
-          </p>
-          <button
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-border bg-background px-4 text-sm font-medium transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            disabled={disabled}
-            onClick={onAddWidget}
-            type="button"
-          >
-            <Plus className="h-4 w-4" />
-            Add widget
-          </button>
-        </div>
-      </div>
       {selectedWidget ? (
         <div className="rounded-[28px] border border-border/70 bg-background p-4 shadow-sm">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -1796,25 +1780,7 @@ export function DashboardBuilderShell({
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-[36px] border border-border/60 bg-gradient-to-br from-stone-100 via-background to-emerald-50 p-6 shadow-sm">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-              Dashboard builder
-            </p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">Build dashboards tab by tab.</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Organize each tab on a live grid, then persist the layout through the existing builder config.
-            </p>
-          </div>
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            {isPending || isDataPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-            <span>{isPending || isDataPending ? "Updating tab" : "Saved to your workspace"}</span>
-          </div>
-        </div>
-      </section>
-
+    <div className="space-y-4">
       <DashboardTabBar
         activeTab={activeTab ?? null}
         activeTabId={activeTab.id}
@@ -1832,29 +1798,22 @@ export function DashboardBuilderShell({
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Card className="bg-background/95">
-          <CardHeader>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Canvas</p>
-            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-              <div>
-                <CardTitle className="text-2xl">{activeTab.title}</CardTitle>
-                <CardDescription className="mt-2">
-                  {activeTab.description ?? "Saved widgets render directly in this builder canvas."}
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge className="rounded-full border border-border/70 bg-background px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-foreground">
-                  {activeTab.widgets.length === 1 ? "1 widget" : `${activeTab.widgets.length} widgets`}
-                </Badge>
-                <Badge className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-emerald-900">
-                  Active window: {formatDateRangeLabel(activeTab.dateRange)}
-                </Badge>
-                <Badge className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-sky-900">
-                  Hard client filter: {formatClientScopeLabel(activeTab.hardFilters.clientId, availableClients)}
-                </Badge>
+          <CardContent>
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <Badge className="rounded-full border border-border/70 bg-background px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-foreground">
+                {activeTab.widgets.length === 1 ? "1 widget" : `${activeTab.widgets.length} widgets`}
+              </Badge>
+              <Badge className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-emerald-900">
+                Active window: {formatDateRangeLabel(activeTab.dateRange)}
+              </Badge>
+              <Badge className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-sky-900">
+                Hard client filter: {formatClientScopeLabel(activeTab.hardFilters.clientId, availableClients)}
+              </Badge>
+              <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">
+                {isPending || isDataPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+                <span>{isPending || isDataPending ? "Updating tab" : "Saved to your workspace"}</span>
               </div>
             </div>
-          </CardHeader>
-          <CardContent>
             {activeTabData ? (
               <BuilderCanvas
                 data={activeTabData.current}
