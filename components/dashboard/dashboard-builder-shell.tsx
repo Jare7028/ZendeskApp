@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  BAR_METRIC_OPTIONS_BY_DIMENSION,
   METRIC_FORMATS,
   METRIC_LABELS,
   TABLE_COLUMN_LABELS
@@ -58,6 +59,7 @@ type BuilderOverviewSnapshot = {
 type BuilderDashboardData = {
   current: BuilderOverviewSnapshot;
   previous: BuilderOverviewSnapshot | null;
+  metricTrends: DashboardData["trends"]["metrics"];
   trends: Array<{
     date: string;
     interactions: number;
@@ -308,6 +310,7 @@ function buildBuilderDashboardData(current: DashboardData, previous: DashboardDa
   return {
     current: buildSnapshot(current),
     previous: previous ? buildSnapshot(previous) : null,
+    metricTrends: current.trends.metrics ?? {},
     trends: current.trends.volume.map((point, index) => ({
       date: point.date,
       interactions: point.interactions,
@@ -353,6 +356,63 @@ function getMetricFormat(metricKey: DashboardMetricKey) {
   return METRIC_FORMATS[metricKey];
 }
 
+function getWidgetMetricKeys(widget: DashboardWidget): DashboardMetricKey[] {
+  switch (widget.type) {
+    case "kpi":
+      return [widget.config.metricKey];
+    case "line":
+    case "bar":
+      return widget.config.metricKeys;
+    default:
+      return [];
+  }
+}
+
+function applyMetricKeysToWidget(widget: DashboardWidget, metricKeys: DashboardMetricKey[]) {
+  switch (widget.type) {
+    case "kpi": {
+      const metricKey = metricKeys[0] ?? widget.config.metricKey;
+      return {
+        ...widget,
+        config: {
+          ...widget.config,
+          metricKey,
+          format: getMetricFormat(metricKey)
+        }
+      };
+    }
+    case "line":
+      return {
+        ...widget,
+        config: {
+          ...widget.config,
+          metricKeys: metricKeys.length > 0 ? [...new Set(metricKeys)] : widget.config.metricKeys
+        }
+      };
+    case "bar": {
+      const supportedMetricKeys = BAR_METRIC_OPTIONS_BY_DIMENSION[widget.config.dimension];
+      const nextMetricKeys = metricKeys.filter((metricKey) =>
+        supportedMetricKeys.some((supportedMetricKey) => supportedMetricKey === metricKey)
+      );
+
+      return {
+        ...widget,
+        config: {
+          ...widget.config,
+          metricKeys:
+            nextMetricKeys.length > 0
+              ? ([...new Set(nextMetricKeys)] as DashboardMetricKey[])
+              : widget.config.dimension === "channel"
+                ? (["tickets_created"] as DashboardMetricKey[])
+                : (supportedMetricKeys.slice(0, 2) as DashboardMetricKey[])
+        }
+      };
+    }
+    default:
+      return widget;
+  }
+}
+
 function getMetricValue(snapshot: BuilderOverviewSnapshot, metricKey: DashboardMetricKey) {
   switch (metricKey) {
     case "tickets_created":
@@ -396,18 +456,7 @@ function getMetricValue(snapshot: BuilderOverviewSnapshot, metricKey: DashboardM
 }
 
 function getMetricSeries(data: BuilderDashboardData, metricKey: DashboardMetricKey) {
-  switch (metricKey) {
-    case "tickets_created":
-      return data.trends.map((point) => ({ date: point.date, value: point.interactions }));
-    case "hours_worked":
-      return data.trends.map((point) => ({ date: point.date, value: point.hoursWorked }));
-    case "avg_first_reply_minutes":
-      return data.trends.map((point) => ({ date: point.date, value: point.avgFirstReplyMinutes }));
-    case "avg_full_resolution_minutes":
-      return data.trends.map((point) => ({ date: point.date, value: point.avgFullResolutionMinutes }));
-    default:
-      return [];
-  }
+  return data.metricTrends[metricKey] ?? [];
 }
 
 function getBarData(data: BuilderDashboardData, widget: Extract<DashboardWidget, { type: "bar" }>): BuilderBarDatum[] {
@@ -1065,9 +1114,9 @@ function getWidgetTemplate(type: DashboardWidgetType) {
     case "line":
       return {
         config: { metricKeys: ["tickets_created", "hours_worked"], granularity: "daily", stacked: false },
-        description: "Ticket volume against matched hours.",
+        description: "Plot one or more measures across the active window.",
         layout: { h: 4, minH: 3, minW: 3, w: 8, x: 0, y: 0 },
-        title: "Volume trend",
+        title: "Metric trend",
         type
       } satisfies Pick<Extract<DashboardWidget, { type: "line" }>, "type" | "title" | "description" | "config" | "layout">;
     case "bar":
@@ -1670,7 +1719,10 @@ export function DashboardBuilderShell({
 
           const currentTemplate = getWidgetTemplate(widget.type);
           const nextTemplate = getWidgetTemplate(nextType);
-          const nextWidget = buildWidget(widget.id, widgetIndex, nextType);
+          const nextWidget = applyMetricKeysToWidget(
+            buildWidget(widget.id, widgetIndex, nextType),
+            getWidgetMetricKeys(widget)
+          );
 
           return {
             ...nextWidget,

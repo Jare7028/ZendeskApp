@@ -167,12 +167,7 @@ const DEFAULT_TABLE_CONFIG: DashboardTableWidgetConfig = {
   sort: { key: "tickets_created", direction: "desc" }
 };
 
-const SUPPORTED_LINE_METRICS: DashboardMetricKey[] = [
-  "tickets_created",
-  "hours_worked",
-  "avg_first_reply_minutes",
-  "avg_full_resolution_minutes"
-];
+const SUPPORTED_LINE_METRICS: DashboardMetricKey[] = [...DASHBOARD_BUILDER_METRIC_KEYS];
 
 const SUPPORTED_BAR_METRICS_BY_DIMENSION: Record<DashboardBarWidgetConfig["dimension"], DashboardMetricKey[]> = {
   agent: [
@@ -551,8 +546,8 @@ export function buildDefaultDashboardBuilderConfig(): DashboardBuilderConfig {
           {
             id: "volume-trend",
             type: "line",
-            title: "Volume trend",
-            description: "Daily ticket creation trend.",
+            title: "Metric trend",
+            description: "Plot one or more measures across the active window.",
             layout: { x: 0, y: 2, w: 8, h: 4, minW: 4, minH: 3 },
             config: { metricKeys: ["tickets_created", "hours_worked"], granularity: "daily", stacked: false }
           },

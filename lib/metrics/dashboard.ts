@@ -71,6 +71,7 @@ type TicketRow = {
   client_id: string;
   zendesk_connection_id: string;
   agent_mapping_id: string | null;
+  created_at_source: string | null;
   raw_payload: JsonObject | null;
 };
 
@@ -101,6 +102,7 @@ type ServiceMetricWindowRow = {
   clientId: string;
   zendeskConnectionId: string;
   agentMappingId: string | null;
+  createdAtSource: string | null;
   firstResponseMinutes: number | null;
   fullResolutionMinutes: number | null;
   payload: JsonObject | null;
@@ -124,6 +126,11 @@ export type DailyChannelPoint = {
   chat: number;
   phone: number;
   other: number;
+};
+
+type DailyMetricTrendPoint = {
+  date: string;
+  value: number | null;
 };
 
 type ServiceStats = {
@@ -275,6 +282,7 @@ export type DashboardData = {
     volume: DailyVolumePoint[];
     response: DailyResponsePoint[];
     channel: DailyChannelPoint[];
+    metrics: Record<string, DailyMetricTrendPoint[]>;
   };
   leaderboard: {
     rows: AgentLeaderboardRow[];
@@ -287,6 +295,28 @@ export type DashboardData = {
     easiestClientId: string | null;
   };
 };
+
+const TREND_METRIC_KEYS = [
+  "tickets_created",
+  "ticket_replies",
+  "hours_worked",
+  "interactions_per_hour_worked",
+  "replies_per_hour_worked",
+  "replies_per_ticket",
+  "avg_first_reply_minutes",
+  "median_first_reply_minutes",
+  "p90_first_reply_minutes",
+  "avg_full_resolution_minutes",
+  "median_full_resolution_minutes",
+  "p90_full_resolution_minutes",
+  "agent_utilisation_ratio",
+  "requester_wait_time_minutes",
+  "reopens",
+  "reopens_per_agent",
+  "sla_first_reply_compliance",
+  "sla_full_resolution_compliance"
+] as const;
+type TrendMetricKey = (typeof TREND_METRIC_KEYS)[number];
 
 export type AgentDetailData = {
   filters: DashboardScope["filters"];
@@ -383,6 +413,15 @@ function readPayloadNumber(payload: JsonObject | null, key: string) {
   }
 
   return null;
+}
+
+function toDateKey(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
 
 function percentile(values: number[], target: number) {
@@ -577,7 +616,7 @@ async function getServiceMetricWindowRows(options: {
   const supabase = createServerSupabaseClient().schema("app");
   const { data: tickets, error: ticketsError } = await supabase
     .from("tickets")
-    .select("id,client_id,zendesk_connection_id,agent_mapping_id,raw_payload")
+    .select("id,client_id,zendesk_connection_id,agent_mapping_id,created_at_source,raw_payload")
     .in("client_id", options.clientIds)
     .gte("created_at_source", `${options.startDate}T00:00:00.000Z`)
     .lte("created_at_source", `${options.endDate}T23:59:59.999Z`);
@@ -652,6 +691,7 @@ async function getServiceMetricWindowRows(options: {
 
             return agentMappingByClientAndZendeskAgentId.get(`${ticket.client_id}:${String(assigneeId)}`) ?? null;
           })(),
+        createdAtSource: ticket.created_at_source,
         firstResponseMinutes: row.first_response_minutes,
         fullResolutionMinutes: row.full_resolution_minutes,
         payload: row.payload
@@ -1124,6 +1164,183 @@ function buildChannelTrends(rows: ComputedMetricRow[]) {
   }
 
   return [...byDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function buildMetricTrends(
+  rows: ComputedMetricRow[],
+  serviceRows: ServiceMetricWindowRow[],
+  clientSlaConfigs: Map<string, ClientSlaConfig>
+) {
+  const operationalByDate = new Map<
+    string,
+    {
+      totalInteractions: number;
+      totalHoursWorked: number;
+      totalActivityHours: number;
+      totalReplies: number;
+      totalReopens: number;
+      activeAgentsCount: number;
+    }
+  >();
+  const serviceByDate = new Map<
+    string,
+    {
+      firstReplyValues: number[];
+      fullResolutionValues: number[];
+      requesterWaitValues: number[];
+      firstReplyMeasuredCount: number;
+      firstReplyCompliantCount: number;
+      fullResolutionMeasuredCount: number;
+      fullResolutionCompliantCount: number;
+    }
+  >();
+  const allDates = new Set<string>();
+
+  for (const row of rows) {
+    const entry = operationalByDate.get(row.metric_date) ?? {
+      totalInteractions: 0,
+      totalHoursWorked: 0,
+      totalActivityHours: 0,
+      totalReplies: 0,
+      totalReopens: 0,
+      activeAgentsCount: 0
+    };
+
+    switch (row.metric_key) {
+      case "total_interactions":
+        entry.totalInteractions += row.metric_value;
+        break;
+      case "total_hours_worked":
+        entry.totalHoursWorked += row.metric_value;
+        break;
+      case "total_activity_hours":
+        entry.totalActivityHours += row.metric_value;
+        break;
+      case "total_replies":
+        entry.totalReplies += row.metric_value;
+        break;
+      case "total_reopens":
+        entry.totalReopens += row.metric_value;
+        break;
+      case "active_agents_count":
+        entry.activeAgentsCount += row.metric_value;
+        break;
+      default:
+        break;
+    }
+
+    operationalByDate.set(row.metric_date, entry);
+    allDates.add(row.metric_date);
+  }
+
+  for (const row of serviceRows) {
+    const metricDate = toDateKey(row.createdAtSource);
+
+    if (!metricDate) {
+      continue;
+    }
+
+    const entry = serviceByDate.get(metricDate) ?? {
+      firstReplyValues: [],
+      fullResolutionValues: [],
+      requesterWaitValues: [],
+      firstReplyMeasuredCount: 0,
+      firstReplyCompliantCount: 0,
+      fullResolutionMeasuredCount: 0,
+      fullResolutionCompliantCount: 0
+    };
+
+    if (row.firstResponseMinutes !== null && Number.isFinite(row.firstResponseMinutes)) {
+      entry.firstReplyValues.push(row.firstResponseMinutes);
+
+      const firstReplyTarget = clientSlaConfigs.get(row.clientId)?.config.firstReplyTargetMinutes ?? null;
+      if (firstReplyTarget !== null) {
+        entry.firstReplyMeasuredCount += 1;
+        if (row.firstResponseMinutes <= firstReplyTarget) {
+          entry.firstReplyCompliantCount += 1;
+        }
+      }
+    }
+
+    if (row.fullResolutionMinutes !== null && Number.isFinite(row.fullResolutionMinutes)) {
+      entry.fullResolutionValues.push(row.fullResolutionMinutes);
+
+      const fullResolutionTarget = clientSlaConfigs.get(row.clientId)?.config.fullResolutionTargetMinutes ?? null;
+      if (fullResolutionTarget !== null) {
+        entry.fullResolutionMeasuredCount += 1;
+        if (row.fullResolutionMinutes <= fullResolutionTarget) {
+          entry.fullResolutionCompliantCount += 1;
+        }
+      }
+    }
+
+    const requesterWait = readPayloadNumber(row.payload, "requester_wait_time_in_minutes");
+    if (requesterWait !== null && Number.isFinite(requesterWait)) {
+      entry.requesterWaitValues.push(requesterWait);
+    }
+
+    serviceByDate.set(metricDate, entry);
+    allDates.add(metricDate);
+  }
+
+  const sortedDates = [...allDates].sort((left, right) => left.localeCompare(right));
+
+  const buildSeries = (getter: (date: string) => number | null): DailyMetricTrendPoint[] =>
+    sortedDates.map((date) => ({ date, value: getter(date) }));
+
+  const metrics = {
+    tickets_created: buildSeries((date) => operationalByDate.get(date)?.totalInteractions ?? 0),
+    ticket_replies: buildSeries((date) => operationalByDate.get(date)?.totalReplies ?? 0),
+    hours_worked: buildSeries((date) => operationalByDate.get(date)?.totalHoursWorked ?? 0),
+    interactions_per_hour_worked: buildSeries((date) => {
+      const entry = operationalByDate.get(date);
+      return entry && entry.totalHoursWorked > 0 ? entry.totalInteractions / entry.totalHoursWorked : null;
+    }),
+    replies_per_hour_worked: buildSeries((date) => {
+      const entry = operationalByDate.get(date);
+      return entry && entry.totalHoursWorked > 0 ? entry.totalReplies / entry.totalHoursWorked : null;
+    }),
+    replies_per_ticket: buildSeries((date) => {
+      const entry = operationalByDate.get(date);
+      return entry && entry.totalInteractions > 0 ? entry.totalReplies / entry.totalInteractions : null;
+    }),
+    avg_first_reply_minutes: buildSeries((date) => average(serviceByDate.get(date)?.firstReplyValues ?? [])),
+    median_first_reply_minutes: buildSeries((date) => percentile(serviceByDate.get(date)?.firstReplyValues ?? [], 0.5)),
+    p90_first_reply_minutes: buildSeries((date) => percentile(serviceByDate.get(date)?.firstReplyValues ?? [], 0.9)),
+    avg_full_resolution_minutes: buildSeries((date) => average(serviceByDate.get(date)?.fullResolutionValues ?? [])),
+    median_full_resolution_minutes: buildSeries((date) =>
+      percentile(serviceByDate.get(date)?.fullResolutionValues ?? [], 0.5)
+    ),
+    p90_full_resolution_minutes: buildSeries((date) =>
+      percentile(serviceByDate.get(date)?.fullResolutionValues ?? [], 0.9)
+    ),
+    agent_utilisation_ratio: buildSeries((date) => {
+      const entry = operationalByDate.get(date);
+      return entry && entry.totalHoursWorked > 0 ? entry.totalActivityHours / entry.totalHoursWorked : null;
+    }),
+    requester_wait_time_minutes: buildSeries((date) => average(serviceByDate.get(date)?.requesterWaitValues ?? [])),
+    reopens: buildSeries((date) => operationalByDate.get(date)?.totalReopens ?? 0),
+    reopens_per_agent: buildSeries((date) => {
+      const entry = operationalByDate.get(date);
+      return entry && entry.activeAgentsCount > 0 ? entry.totalReopens / entry.activeAgentsCount : null;
+    }),
+    sla_first_reply_compliance: buildSeries((date) => {
+      const entry = serviceByDate.get(date);
+      return entry && entry.firstReplyMeasuredCount > 0
+        ? (entry.firstReplyCompliantCount / entry.firstReplyMeasuredCount) * 100
+        : null;
+    }),
+    sla_full_resolution_compliance: buildSeries((date) => {
+      const entry = serviceByDate.get(date);
+      return entry && entry.fullResolutionMeasuredCount > 0
+        ? (entry.fullResolutionCompliantCount / entry.fullResolutionMeasuredCount) * 100
+        : null;
+    })
+  } satisfies Record<TrendMetricKey, DailyMetricTrendPoint[]>;
+
+  return Object.fromEntries(
+    TREND_METRIC_KEYS.map((metricKey) => [metricKey, metrics[metricKey]])
+  ) satisfies Record<string, DailyMetricTrendPoint[]>;
 }
 
 function buildAgentLeaderboardRows(rows: ComputedMetricRow[], agentOptions: AgentOption[], clientNameById: Map<string, string>) {
@@ -1668,7 +1885,8 @@ export async function getDashboardData(
       trends: {
         volume: [],
         response: [],
-        channel: []
+        channel: [],
+        metrics: {}
       },
       leaderboard: {
         rows: [],
@@ -1771,7 +1989,8 @@ export async function getDashboardData(
     trends: {
       volume: buildVolumeTrends(mainRows),
       response: buildResponseTrends(mainRows),
-      channel: buildChannelTrends(channelRows)
+      channel: buildChannelTrends(channelRows),
+      metrics: buildMetricTrends(mainRows, serviceRows, clientSlaConfigs)
     },
     leaderboard: {
       rows: leaderboardRows,

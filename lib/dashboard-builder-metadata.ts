@@ -58,7 +58,7 @@ export const TABLE_COLUMN_LABELS: Record<DashboardTableColumnKey, string> = {
   reopens: "Reopens"
 };
 
-export const KPI_METRIC_OPTIONS: DashboardMetricKey[] = [
+export const DASHBOARD_METRIC_OPTIONS: DashboardMetricKey[] = [
   "tickets_created",
   "ticket_replies",
   "hours_worked",
@@ -79,12 +79,8 @@ export const KPI_METRIC_OPTIONS: DashboardMetricKey[] = [
   "sla_full_resolution_compliance"
 ];
 
-export const LINE_METRIC_OPTIONS: DashboardMetricKey[] = [
-  "tickets_created",
-  "hours_worked",
-  "avg_first_reply_minutes",
-  "avg_full_resolution_minutes"
-];
+export const KPI_METRIC_OPTIONS = DASHBOARD_METRIC_OPTIONS;
+export const LINE_METRIC_OPTIONS = DASHBOARD_METRIC_OPTIONS;
 
 export const BAR_METRIC_OPTIONS_BY_DIMENSION = {
   agent: [

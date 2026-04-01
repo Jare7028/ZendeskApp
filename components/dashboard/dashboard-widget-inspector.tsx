@@ -11,8 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   BAR_METRIC_OPTIONS_BY_DIMENSION,
-  KPI_METRIC_OPTIONS,
-  LINE_METRIC_OPTIONS,
+  DASHBOARD_METRIC_OPTIONS,
   METRIC_LABELS,
   TABLE_COLUMN_LABELS,
   TABLE_COLUMNS_BY_DATASET,
@@ -103,7 +102,7 @@ function MultiSelectPills({
 }: {
   disabled?: boolean;
   onToggle: (value: string) => void;
-  options: ReadonlyArray<{ label: string; value: string }>;
+  options: ReadonlyArray<{ disabled?: boolean; label: string; value: string }>;
   selected: string[];
 }) {
   return (
@@ -116,9 +115,13 @@ function MultiSelectPills({
             key={option.value}
             className={cn(
               "rounded-full border px-3 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              active ? "border-foreground bg-foreground text-background" : "border-border/70 bg-background hover:bg-muted/60"
+              active
+                ? "border-foreground bg-foreground text-background"
+                : option.disabled
+                  ? "cursor-not-allowed border-border/50 bg-muted/30 text-muted-foreground opacity-60"
+                  : "border-border/70 bg-background hover:bg-muted/60"
             )}
-            disabled={disabled}
+            disabled={disabled || option.disabled}
             onClick={() => onToggle(option.value)}
             type="button"
           >
@@ -293,7 +296,7 @@ export function DashboardWidgetInspector({
               <>
                 <InspectorField label="Metric">
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {KPI_METRIC_OPTIONS.map((metricKey) => (
+                    {DASHBOARD_METRIC_OPTIONS.map((metricKey) => (
                       <PillButton
                         key={metricKey}
                         active={selectedWidget.config.metricKey === metricKey}
@@ -378,9 +381,15 @@ export function DashboardWidgetInspector({
                       };
                     })
                   }
-                  options={LINE_METRIC_OPTIONS.map((metricKey) => ({ label: METRIC_LABELS[metricKey], value: metricKey }))}
+                  options={DASHBOARD_METRIC_OPTIONS.map((metricKey) => ({
+                    label: METRIC_LABELS[metricKey],
+                    value: metricKey
+                  }))}
                   selected={selectedWidget.config.metricKeys}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Line charts now use the same metric library as KPI cards, so switching visual style does not force a different measure list.
+                </p>
               </InspectorField>
             ) : null}
 
@@ -401,10 +410,21 @@ export function DashboardWidgetInspector({
                                   config: {
                                     ...widget.config,
                                     dimension,
-                                    metricKeys: BAR_METRIC_OPTIONS_BY_DIMENSION[dimension].slice(
-                                      0,
-                                      dimension === "channel" ? 1 : Math.min(2, BAR_METRIC_OPTIONS_BY_DIMENSION[dimension].length)
-                                    )
+                                    metricKeys: (() => {
+                                      const supportedMetricKeys = BAR_METRIC_OPTIONS_BY_DIMENSION[dimension];
+                                      const preservedMetricKeys = widget.config.metricKeys.filter((metricKey) =>
+                                        supportedMetricKeys.some((supportedMetricKey) => supportedMetricKey === metricKey)
+                                      );
+
+                                      if (preservedMetricKeys.length > 0) {
+                                        return preservedMetricKeys as DashboardMetricKey[];
+                                      }
+
+                                      return supportedMetricKeys.slice(
+                                        0,
+                                        dimension === "channel" ? 1 : Math.min(2, supportedMetricKeys.length)
+                                      ) as DashboardMetricKey[];
+                                    })()
                                   }
                                 }
                               : widget
@@ -440,7 +460,10 @@ export function DashboardWidgetInspector({
                         };
                       })
                     }
-                    options={BAR_METRIC_OPTIONS_BY_DIMENSION[selectedWidget.config.dimension].map((metricKey) => ({
+                    options={DASHBOARD_METRIC_OPTIONS.map((metricKey) => ({
+                      disabled: !BAR_METRIC_OPTIONS_BY_DIMENSION[selectedWidget.config.dimension].some(
+                        (supportedMetricKey) => supportedMetricKey === metricKey
+                      ),
                       label: METRIC_LABELS[metricKey],
                       value: metricKey
                     }))}
@@ -448,7 +471,11 @@ export function DashboardWidgetInspector({
                   />
                   {selectedWidget.config.dimension === "channel" ? (
                     <p className="text-xs text-muted-foreground">Channel widgets currently support ticket volume only.</p>
-                  ) : null}
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      The same metric catalog is shown here too. Unavailable measures are dimmed when the chosen dimension cannot support them yet.
+                    </p>
+                  )}
                 </InspectorField>
               </>
             ) : null}
