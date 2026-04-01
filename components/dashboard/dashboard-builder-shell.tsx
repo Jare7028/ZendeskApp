@@ -1365,15 +1365,25 @@ function BuilderCanvas({
 
   return (
     <div className="space-y-4">
-      <div className="overflow-x-auto pb-2">
+      <div
+        className="overflow-x-auto pb-2"
+        onPointerDownCapture={(event) => {
+          const target = event.target;
+
+          if (!(target instanceof HTMLElement)) {
+            return;
+          }
+
+          if (target.closest('[data-dashboard-widget-root="true"]')) {
+            return;
+          }
+
+          onClearSelection();
+        }}
+      >
         <div
           ref={canvasRef}
           className="grid min-w-[960px] gap-4"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              onClearSelection();
-            }
-          }}
           style={{
             gridAutoRows: `${DASHBOARD_GRID_ROW_HEIGHT}px`,
             gridTemplateColumns: `repeat(${DASHBOARD_GRID_COLUMNS}, minmax(0, 1fr))`
@@ -1387,6 +1397,7 @@ function BuilderCanvas({
             return (
               <div
                 key={widget.id}
+                data-dashboard-widget-root="true"
                 className={cn(
                   "group relative",
                   activeInteraction?.widgetId === widget.id ? "z-30" : isSelected ? "z-20" : "z-0"
