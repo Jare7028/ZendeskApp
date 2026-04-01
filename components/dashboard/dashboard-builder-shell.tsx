@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -1196,6 +1196,7 @@ export function DashboardBuilderShell({
   }));
   const [isDataPending, setIsDataPending] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const refreshedTabRangeKeysRef = useRef(new Set<string>());
 
   const activeTab = record.config.tabs.find((tab) => tab.id === activeTabId) ?? record.config.tabs[0];
   const selectedWidget = activeTab?.widgets.find((widget) => widget.id === selectedWidgetId) ?? activeTab?.widgets[0] ?? null;
@@ -1227,6 +1228,11 @@ export function DashboardBuilderShell({
       return;
     }
 
+    const refreshKey = `${activeTab.id}:${activeTabRangeKey}`;
+    if (refreshedTabRangeKeysRef.current.has(refreshKey)) {
+      return;
+    }
+
     let cancelled = false;
     setIsDataPending(true);
     setDataError(null);
@@ -1244,6 +1250,7 @@ export function DashboardBuilderShell({
             value: payload
           }
         }));
+        refreshedTabRangeKeysRef.current.add(refreshKey);
       })
       .catch((error: unknown) => {
         if (cancelled) {
