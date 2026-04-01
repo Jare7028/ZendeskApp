@@ -1621,6 +1621,28 @@ export function DashboardBuilderShell({
     persistConfig(nextConfig, tabId, tabId === activeTab?.id ? selectedWidget?.id ?? "" : selectedWidgetId);
   }
 
+  function handleUpdateTabTitle(tabId: string, nextTitle: string) {
+    const normalizedTitle = nextTitle.trim();
+
+    if (!normalizedTitle) {
+      return;
+    }
+
+    const nextConfig = {
+      ...record.config,
+      tabs: record.config.tabs.map((tab) =>
+        tab.id === tabId
+          ? {
+              ...tab,
+              title: normalizedTitle
+            }
+          : tab
+      )
+    } satisfies DashboardBuilderConfig;
+
+    persistConfig(nextConfig, tabId, tabId === activeTab?.id ? selectedWidget?.id ?? "" : selectedWidgetId);
+  }
+
   function handleUpdateTabHardFilters(tabId: string, nextHardFilters: DashboardTabHardFilters) {
     const nextConfig = {
       ...record.config,
@@ -1775,6 +1797,7 @@ export function DashboardBuilderShell({
         clients={availableClients}
         disabled={isPending || isDataPending}
         onAddTab={handleAddTab}
+        onUpdateTitle={handleUpdateTabTitle}
         onUpdateHardFilters={handleUpdateTabHardFilters}
         onUpdateDateRange={handleUpdateTabDateRange}
         onSelectTab={(tabId) => {

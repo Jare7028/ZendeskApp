@@ -31,6 +31,7 @@ export function DashboardTabBar({
   clients,
   disabled,
   onAddTab,
+  onUpdateTitle,
   onUpdateHardFilters,
   onUpdateDateRange,
   onSelectTab,
@@ -41,6 +42,7 @@ export function DashboardTabBar({
   clients: Array<{ id: string; name: string }>;
   disabled: boolean;
   onAddTab: () => void;
+  onUpdateTitle: (tabId: string, nextTitle: string) => void;
   onUpdateHardFilters: (tabId: string, nextHardFilters: DashboardTabHardFilters) => void;
   onUpdateDateRange: (tabId: string, nextDateRange: DashboardTab["dateRange"]) => void;
   onSelectTab: (tabId: string) => void;
@@ -49,10 +51,7 @@ export function DashboardTabBar({
   return (
     <div className="flex flex-col gap-3 rounded-[28px] border border-border/60 bg-background/95 p-4 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Tabs</p>
-          <p className="mt-1 text-sm text-muted-foreground">Switch context or start a fresh canvas.</p>
-        </div>
+        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Tabs</p>
         <Button className="gap-2" disabled={disabled} onClick={onAddTab} variant="outline">
           <Plus className="h-4 w-4" />
           New tab
@@ -108,7 +107,35 @@ export function DashboardTabBar({
                 </div>
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-2 sm:col-span-2 lg:col-span-1">
+                <Label htmlFor={`${activeTab.id}-title`}>Tab name</Label>
+                <Input
+                  defaultValue={activeTab.title}
+                  disabled={disabled}
+                  id={`${activeTab.id}-title`}
+                  key={`${activeTab.id}-title`}
+                  onBlur={(event) => {
+                    const value = event.currentTarget.value.trim();
+
+                    if (!value) {
+                      event.currentTarget.value = activeTab.title;
+                      return;
+                    }
+
+                    if (value !== activeTab.title) {
+                      onUpdateTitle(activeTab.id, value);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  placeholder="Tab name"
+                />
+              </div>
               <div className="space-y-2">
                 <Label htmlFor={`${activeTab.id}-start`}>Start date</Label>
                 <Input
