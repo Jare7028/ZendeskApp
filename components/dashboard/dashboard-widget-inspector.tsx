@@ -1,8 +1,9 @@
 "use client";
 
 import { type ReactNode } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Minus, Plus, Settings2, Trash2 } from "lucide-react";
+import { Plus, Settings2, Trash2 } from "lucide-react";
 
+import { DashboardLayoutControls } from "@/components/dashboard/dashboard-layout-controls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -134,9 +135,8 @@ export function DashboardWidgetInspector({
   disabled,
   onAddWidget,
   onDeleteWidget,
-  onMoveWidget,
-  onResizeWidget,
   onSelectWidget,
+  onUpdateWidgetLayout,
   onUpdateWidget,
   saveError,
   selectedWidget,
@@ -147,9 +147,11 @@ export function DashboardWidgetInspector({
   disabled: boolean;
   onAddWidget: () => void;
   onDeleteWidget: (widgetId: string) => void;
-  onMoveWidget: (widgetId: string, direction: "down" | "left" | "right" | "up") => void;
-  onResizeWidget: (widgetId: string, dimension: "h" | "w", delta: number) => void;
   onSelectWidget: (widgetId: string) => void;
+  onUpdateWidgetLayout: (
+    widgetId: string,
+    nextLayout: Partial<Pick<DashboardWidget["layout"], "h" | "w" | "x" | "y">>
+  ) => void;
   onUpdateWidget: (widgetId: string, updater: (widget: DashboardWidget) => DashboardWidget) => void;
   saveError: string | null;
   selectedWidget: DashboardWidget | null;
@@ -279,73 +281,12 @@ export function DashboardWidgetInspector({
             </InspectorField>
 
             <InspectorField label="Layout">
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                  {([
-                    ["up", ArrowUp, "Move up"],
-                    ["left", ArrowLeft, "Move left"],
-                    ["right", ArrowRight, "Move right"],
-                    ["down", ArrowDown, "Move down"]
-                  ] as const).map(([direction, Icon, label]) => (
-                    <Button
-                      key={direction}
-                      className="justify-start gap-2"
-                      disabled={disabled}
-                      onClick={() => onMoveWidget(selectedWidget.id, direction)}
-                      type="button"
-                      variant="outline"
-                    >
-                      <Icon className="h-4 w-4" />
-                      {label}
-                    </Button>
-                  ))}
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    className="justify-start gap-2"
-                    disabled={disabled || selectedWidget.layout.w <= (selectedWidget.layout.minW ?? 2)}
-                    onClick={() => onResizeWidget(selectedWidget.id, "w", -1)}
-                    type="button"
-                    variant="outline"
-                  >
-                    <Minus className="h-4 w-4" />
-                    Narrower
-                  </Button>
-                  <Button
-                    className="justify-start gap-2"
-                    disabled={disabled || selectedWidget.layout.w >= 12}
-                    onClick={() => onResizeWidget(selectedWidget.id, "w", 1)}
-                    type="button"
-                    variant="outline"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Wider
-                  </Button>
-                  <Button
-                    className="justify-start gap-2"
-                    disabled={disabled || selectedWidget.layout.h <= (selectedWidget.layout.minH ?? 2)}
-                    onClick={() => onResizeWidget(selectedWidget.id, "h", -1)}
-                    type="button"
-                    variant="outline"
-                  >
-                    <Minus className="h-4 w-4" />
-                    Shorter
-                  </Button>
-                  <Button
-                    className="justify-start gap-2"
-                    disabled={disabled || selectedWidget.layout.h >= 12}
-                    onClick={() => onResizeWidget(selectedWidget.id, "h", 1)}
-                    type="button"
-                    variant="outline"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Taller
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Position {selectedWidget.layout.x + 1}, {selectedWidget.layout.y + 1} on a 12-column grid. Size {selectedWidget.layout.w} x {selectedWidget.layout.h}.
-                </p>
-              </div>
+              <DashboardLayoutControls
+                disabled={disabled}
+                idPrefix={`inspector-${selectedWidget.id}`}
+                layout={selectedWidget.layout}
+                onUpdateLayout={(nextLayout) => onUpdateWidgetLayout(selectedWidget.id, nextLayout)}
+              />
             </InspectorField>
 
             {selectedWidget.type === "kpi" ? (

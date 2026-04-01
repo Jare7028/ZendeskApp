@@ -2,23 +2,19 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
   LayoutGrid,
   LoaderCircle,
-  Minus,
   PanelTop,
   Plus,
-  Sparkles,
-  Trash2
+  Sparkles
 } from "lucide-react";
 
+import { DashboardLayoutControls } from "@/components/dashboard/dashboard-layout-controls";
 import { DashboardTabBar } from "@/components/dashboard/dashboard-tab-bar";
 import { DashboardWidgetInspector } from "@/components/dashboard/dashboard-widget-inspector";
 import { formatMinutes, formatNumber, formatPercent } from "@/components/dashboard/dashboard-format";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   METRIC_FORMATS,
@@ -126,8 +122,6 @@ const CHART_COLORS = ["#0f766e", "#d97706", "#0f4c81", "#7c6f64"] as const;
 const DASHBOARD_GRID_COLUMNS = 12;
 const DASHBOARD_GRID_ROW_HEIGHT = 72;
 
-type LayoutDirection = "down" | "left" | "right" | "up";
-type LayoutDimension = "h" | "w";
 type TabRuntimeData = {
   current: DashboardData;
   previous: DashboardData | null;
@@ -175,6 +169,21 @@ function getTabDataKey(tab: Pick<DashboardTab, "dateRange" | "hardFilters">) {
 
 function formatDateRangeLabel(dateRange: DashboardTabDateRange) {
   return `${dateRange.start} to ${dateRange.end}`;
+}
+
+function formatWidgetTypeLabel(type: DashboardWidgetType) {
+  switch (type) {
+    case "kpi":
+      return "KPI";
+    case "line":
+      return "Line";
+    case "bar":
+      return "Bar";
+    case "table":
+      return "Table";
+    default:
+      return "Widget";
+  }
 }
 
 function formatClientScopeLabel(clientId: string, clients: BuilderClientOption[]) {
@@ -555,124 +564,19 @@ function packWidgets(widgets: DashboardWidget[]) {
 }
 
 function DashboardBuilderWidgetCard({
-  disabled,
   isSelected,
-  onDelete,
-  onMove,
-  onResize,
   onSelect,
   widget,
   data,
   previousData
 }: {
-  disabled?: boolean;
   isSelected: boolean;
-  onDelete: () => void;
-  onMove: (direction: LayoutDirection) => void;
-  onResize: (dimension: LayoutDimension, delta: number) => void;
   onSelect: () => void;
   widget: DashboardWidget;
   data: DashboardData;
   previousData?: DashboardData | null;
 }) {
   const builderData = buildBuilderDashboardData(data, previousData ?? null);
-  const canShrinkWidth = widget.layout.w > (widget.layout.minW ?? 2);
-  const canShrinkHeight = widget.layout.h > (widget.layout.minH ?? 2);
-  const canGrowWidth = widget.layout.w < DASHBOARD_GRID_COLUMNS;
-  const canGrowHeight = widget.layout.h < 12;
-
-  const controls = (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/95 p-1">
-        {([
-          ["up", ArrowUp, "Move up"],
-          ["left", ArrowLeft, "Move left"],
-          ["right", ArrowRight, "Move right"],
-          ["down", ArrowDown, "Move down"]
-        ] as const).map(([direction, Icon, label]) => (
-          <button
-            key={direction}
-            aria-label={label}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={disabled}
-            onClick={(event) => {
-              event.stopPropagation();
-              onMove(direction);
-            }}
-            type="button"
-          >
-            <Icon className="h-4 w-4" />
-          </button>
-        ))}
-      </div>
-      <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/95 p-1">
-        <button
-          aria-label="Decrease width"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={disabled || !canShrinkWidth}
-          onClick={(event) => {
-            event.stopPropagation();
-            onResize("w", -1);
-          }}
-          type="button"
-        >
-          <Minus className="h-4 w-4" />
-        </button>
-        <span className="min-w-16 text-center text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          {widget.layout.w} x {widget.layout.h}
-        </span>
-        <button
-          aria-label="Increase width"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={disabled || !canGrowWidth}
-          onClick={(event) => {
-            event.stopPropagation();
-            onResize("w", 1);
-          }}
-          type="button"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-        <button
-          aria-label="Decrease height"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={disabled || !canShrinkHeight}
-          onClick={(event) => {
-            event.stopPropagation();
-            onResize("h", -1);
-          }}
-          type="button"
-        >
-          <ArrowDown className="h-4 w-4 rotate-90" />
-        </button>
-        <button
-          aria-label="Increase height"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={disabled || !canGrowHeight}
-          onClick={(event) => {
-            event.stopPropagation();
-            onResize("h", 1);
-          }}
-          type="button"
-        >
-          <ArrowUp className="h-4 w-4 rotate-90" />
-        </button>
-      </div>
-      <button
-        aria-label={`Delete ${widget.title}`}
-        className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 text-sm font-medium text-rose-700 transition hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
-        disabled={disabled}
-        onClick={(event) => {
-          event.stopPropagation();
-          onDelete();
-        }}
-        type="button"
-      >
-        <Trash2 className="h-4 w-4" />
-        Remove
-      </button>
-    </div>
-  );
 
   if (widget.type === "kpi") {
     const currentValue = getMetricValue(builderData.current, widget.config.metricKey);
@@ -715,11 +619,16 @@ function DashboardBuilderWidgetCard({
             KPI
           </Badge>
         </div>
-        {isSelected ? <div className="mt-4">{controls}</div> : null}
         <div className="mt-4 flex items-center justify-between gap-3 text-sm">
           <span className="text-muted-foreground">{widget.description ?? "Current window"}</span>
           {delta ? <span className="font-medium text-foreground">{delta}</span> : null}
         </div>
+        {isSelected ? (
+          <div className="mt-4 rounded-2xl border border-foreground/10 bg-foreground/[0.03] px-3 py-2 text-xs text-muted-foreground">
+            Selected for layout edits. Position {widget.layout.x + 1}, {widget.layout.y + 1}. Size {widget.layout.w} x{" "}
+            {widget.layout.h}.
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -746,10 +655,15 @@ function DashboardBuilderWidgetCard({
           {widget.description ? <p className="mt-1 text-sm text-muted-foreground">{widget.description}</p> : null}
         </div>
         <Badge className="rounded-full border border-border/70 bg-background px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-foreground">
-          {widget.type === "line" ? "Line" : widget.type === "bar" ? "Bar" : "Table"}
+          {formatWidgetTypeLabel(widget.type)}
         </Badge>
       </div>
-      {isSelected ? <div className="mt-4">{controls}</div> : null}
+      {isSelected ? (
+        <div className="mt-4 rounded-2xl border border-foreground/10 bg-foreground/[0.03] px-3 py-2 text-xs text-muted-foreground">
+          Selected for layout edits. Position {widget.layout.x + 1}, {widget.layout.y + 1}. Size {widget.layout.w} x{" "}
+          {widget.layout.h}.
+        </div>
+      ) : null}
       <div className="mt-5 flex-1">
         {widget.type === "line" ? (
           <div className="space-y-4">
@@ -1080,9 +994,8 @@ function BuilderCanvas({
   disabled,
   onAddWidget,
   onDeleteWidget,
-  onMoveWidget,
-  onResizeWidget,
   onSelectWidget,
+  onUpdateWidgetLayout,
   previousData,
   selectedWidgetId,
   tab
@@ -1091,13 +1004,17 @@ function BuilderCanvas({
   disabled: boolean;
   onAddWidget: () => void;
   onDeleteWidget: (widgetId: string) => void;
-  onMoveWidget: (widgetId: string, direction: LayoutDirection) => void;
-  onResizeWidget: (widgetId: string, dimension: LayoutDimension, delta: number) => void;
   onSelectWidget: (widgetId: string) => void;
+  onUpdateWidgetLayout: (
+    widgetId: string,
+    nextLayout: Partial<Pick<DashboardWidget["layout"], "h" | "w" | "x" | "y">>
+  ) => void;
   previousData?: DashboardData | null;
   selectedWidgetId: string;
   tab: DashboardTab;
 }) {
+  const selectedWidget = tab.widgets.find((widget) => widget.id === selectedWidgetId) ?? tab.widgets[0] ?? null;
+
   if (tab.widgets.length === 0) {
     return (
       <Card className="border-dashed border-border/70 bg-gradient-to-br from-background via-background to-muted/50">
@@ -1147,7 +1064,7 @@ function BuilderCanvas({
       <div className="rounded-[28px] border border-dashed border-border/70 bg-muted/20 p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <p className="text-sm text-muted-foreground">
-            Arrange widgets on a 12-column canvas. Selected cards expose move and resize controls.
+            Arrange widgets on a 12-column canvas. Use the selected-widget toolbar for precise layout changes.
           </p>
           <button
             className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-border bg-background px-4 text-sm font-medium transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -1160,6 +1077,41 @@ function BuilderCanvas({
           </button>
         </div>
       </div>
+      {selectedWidget ? (
+        <div className="rounded-[28px] border border-border/70 bg-background p-4 shadow-sm">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Selected widget</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-lg font-semibold tracking-tight text-foreground">{selectedWidget.title}</p>
+                <Badge className="rounded-full border border-border/70 bg-background px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-foreground">
+                  {formatWidgetTypeLabel(selectedWidget.type)}
+                </Badge>
+              </div>
+              <p className="max-w-2xl text-sm text-muted-foreground">
+                Use exact grid values here instead of hunting across each card. If widgets overlap, the canvas repacks them downward automatically.
+              </p>
+            </div>
+            <Button
+              className="border-rose-200 text-rose-700 hover:bg-rose-50"
+              disabled={disabled}
+              onClick={() => onDeleteWidget(selectedWidget.id)}
+              type="button"
+              variant="outline"
+            >
+              Remove widget
+            </Button>
+          </div>
+          <div className="mt-4">
+            <DashboardLayoutControls
+              disabled={disabled}
+              idPrefix={`canvas-${selectedWidget.id}`}
+              layout={selectedWidget.layout}
+              onUpdateLayout={(nextLayout) => onUpdateWidgetLayout(selectedWidget.id, nextLayout)}
+            />
+          </div>
+        </div>
+      ) : null}
       <div className="overflow-x-auto pb-2">
         <div
           className="grid min-w-[960px] gap-4"
@@ -1178,11 +1130,7 @@ function BuilderCanvas({
             >
               <DashboardBuilderWidgetCard
                 data={data}
-                disabled={disabled}
                 isSelected={widget.id === selectedWidgetId}
-                onDelete={() => onDeleteWidget(widget.id)}
-                onMove={(direction) => onMoveWidget(widget.id, direction)}
-                onResize={(dimension, delta) => onResizeWidget(widget.id, dimension, delta)}
                 onSelect={() => onSelectWidget(widget.id)}
                 previousData={previousData}
                 widget={widget}
@@ -1465,66 +1413,22 @@ export function DashboardBuilderShell({
     updateActiveTabWidgets((widgets) => widgets.filter((widget) => widget.id !== widgetId), nextSelectedWidgetId);
   }
 
-  function handleMoveWidget(widgetId: string, direction: LayoutDirection) {
+  function handleUpdateWidgetLayout(
+    widgetId: string,
+    nextLayout: Partial<Pick<DashboardWidget["layout"], "h" | "w" | "x" | "y">>
+  ) {
     updateActiveTabWidgets(
       (widgets) =>
         widgets.map((widget) => {
           if (widget.id !== widgetId) {
             return widget;
           }
-
-          switch (direction) {
-            case "left":
-              return { ...widget, layout: { ...widget.layout, x: Math.max(0, widget.layout.x - 1) } };
-            case "right":
-              return {
-                ...widget,
-                layout: {
-                  ...widget.layout,
-                  x: Math.min(DASHBOARD_GRID_COLUMNS - widget.layout.w, widget.layout.x + 1)
-                }
-              };
-            case "up":
-              return { ...widget, layout: { ...widget.layout, y: Math.max(0, widget.layout.y - 1) } };
-            case "down":
-              return { ...widget, layout: { ...widget.layout, y: widget.layout.y + 1 } };
-            default:
-              return widget;
-          }
-        }),
-      widgetId
-    );
-  }
-
-  function handleResizeWidget(widgetId: string, dimension: LayoutDimension, delta: number) {
-    updateActiveTabWidgets(
-      (widgets) =>
-        widgets.map((widget) => {
-          if (widget.id !== widgetId) {
-            return widget;
-          }
-
-          if (dimension === "w") {
-            const minWidth = widget.layout.minW ?? 2;
-            const nextWidth = Math.max(minWidth, Math.min(DASHBOARD_GRID_COLUMNS, widget.layout.w + delta));
-
-            return {
-              ...widget,
-              layout: {
-                ...widget.layout,
-                w: nextWidth,
-                x: Math.min(widget.layout.x, DASHBOARD_GRID_COLUMNS - nextWidth)
-              }
-            };
-          }
-
-          const minHeight = widget.layout.minH ?? 2;
 
           return {
             ...widget,
             layout: {
               ...widget.layout,
-              h: Math.max(minHeight, Math.min(12, widget.layout.h + delta))
+              ...nextLayout
             }
           };
         }),
@@ -1603,9 +1507,8 @@ export function DashboardBuilderShell({
                 disabled={isPending || isDataPending}
                 onAddWidget={handleAddWidget}
                 onDeleteWidget={handleDeleteWidget}
-                onMoveWidget={handleMoveWidget}
-                onResizeWidget={handleResizeWidget}
                 onSelectWidget={setSelectedWidgetId}
+                onUpdateWidgetLayout={handleUpdateWidgetLayout}
                 previousData={activeTabData.previous}
                 selectedWidgetId={selectedWidget?.id ?? ""}
                 tab={activeTab}
@@ -1630,9 +1533,8 @@ export function DashboardBuilderShell({
           onAddWidget={handleAddWidget}
           onChangeWidgetType={handleChangeWidgetType}
           onDeleteWidget={handleDeleteWidget}
-          onMoveWidget={handleMoveWidget}
-          onResizeWidget={handleResizeWidget}
           onSelectWidget={setSelectedWidgetId}
+          onUpdateWidgetLayout={handleUpdateWidgetLayout}
           onUpdateWidget={updateWidget}
           saveError={saveError}
           selectedWidget={selectedWidget}
