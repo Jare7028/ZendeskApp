@@ -51,6 +51,7 @@ type ConnecteamPageEnvelope<T> = {
   total: number | null;
   limit: number | null;
   offset: number;
+  nextOffset: number | null;
   hasMore: boolean;
 };
 
@@ -126,20 +127,22 @@ function parsePageEnvelope<T>(payload: unknown, keys: string[], requestedLimit: 
   const limit = toNumber(
     pagination?.limit ?? record?.limit ?? asRecord(record?.data)?.limit ?? requestedLimit
   );
-  const offset =
-    toNumber(pagination?.offset ?? record?.offset ?? asRecord(record?.data)?.offset ?? requestedOffset) ?? requestedOffset;
-  const nextOffset = toNumber(
-    pagination?.nextOffset ?? record?.nextOffset ?? asRecord(record?.data)?.nextOffset
+  const reportedOffset = toNumber(
+    pagination?.offset ?? record?.offset ?? asRecord(record?.data)?.offset ?? requestedOffset
   );
+  const offset = requestedOffset;
+  const nextOffset =
+    toNumber(pagination?.nextOffset ?? record?.nextOffset ?? asRecord(record?.data)?.nextOffset) ??
+    (reportedOffset !== null && reportedOffset > requestedOffset ? reportedOffset : null);
   const hasMore =
     typeof pagination?.hasMore === "boolean"
       ? pagination.hasMore
       : typeof record?.hasMore === "boolean"
         ? (record.hasMore as boolean)
         : nextOffset !== null
-          ? nextOffset > offset
+          ? nextOffset > requestedOffset
           : total !== null
-            ? offset + items.length < total
+            ? requestedOffset + items.length < total
             : items.length === requestedLimit;
 
   return {
@@ -147,6 +150,7 @@ function parsePageEnvelope<T>(payload: unknown, keys: string[], requestedLimit: 
     total,
     limit,
     offset,
+    nextOffset,
     hasMore
   } satisfies ConnecteamPageEnvelope<T>;
 }
@@ -289,7 +293,7 @@ export class ConnecteamClient {
         break;
       }
 
-      offset = page.offset + page.items.length;
+      offset = page.nextOffset ?? page.offset + page.items.length;
     }
 
     return items;
