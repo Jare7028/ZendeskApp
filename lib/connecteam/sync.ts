@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { type ConnecteamConnectionRow, getConnecteamClient } from "@/lib/connecteam/connection";
 import {
+  type ConnecteamJobRecord,
   type ConnecteamSchedulerRecord,
   type ConnecteamShiftRecord,
   type ConnecteamUserRecord
@@ -61,6 +62,9 @@ type ShiftAssignment = {
   endAt: string;
   shiftDate: string;
   scheduledMinutes: number;
+  jobId: string | null;
+  jobTitle: string | null;
+  jobCode: string | null;
   rawPayload: ConnecteamShiftRecord;
 };
 
@@ -71,6 +75,22 @@ type DailyScheduleRow = {
   workDate: string;
   scheduledMinutes: number;
   shiftCount: number;
+};
+
+type StoredShiftRow = {
+  client_id: string;
+  zendesk_connection_id: string | null;
+  connecteam_user_id: string;
+  start_at: string;
+  end_at: string;
+  job_id: string | null;
+};
+
+type ShiftTypeRow = {
+  job_id: string;
+  title: string | null;
+  code: string | null;
+  include_in_worked_hours: boolean;
 };
 
 const SYNC_LOCK_MINUTES = 15;
@@ -255,6 +275,32 @@ function readShiftUserIds(shift: ConnecteamShiftRecord) {
   }
 
   return [...candidates];
+}
+
+function readShiftJobId(shift: ConnecteamShiftRecord) {
+  const record = shift as Record<string, unknown>;
+  const job = asRecord(record.job);
+  return normalizeId(shift.jobId ?? record.jobId ?? record.job_id ?? job?.jobId ?? job?.id);
+}
+
+function readShiftJobTitle(shift: ConnecteamShiftRecord) {
+  const record = shift as Record<string, unknown>;
+  const job = asRecord(record.job);
+  return normalizeString(job?.title ?? job?.name ?? record.jobTitle ?? record.jobName ?? record.title);
+}
+
+function readShiftJobCode(shift: ConnecteamShiftRecord) {
+  const record = shift as Record<string, unknown>;
+  const job = asRecord(record.job);
+  return normalizeString(job?.code ?? record.jobCode ?? record.code);
+}
+
+function readJobId(job: ConnecteamJobRecord) {
+  return normalizeId(job.jobId ?? job.id);
+}
+
+function readJobTitle(job: ConnecteamJobRecord) {
+  return normalizeString(job.title ?? job.name);
 }
 
 function minutesBetween(startAt: string, endAt: string) {
@@ -601,6 +647,41 @@ async function upsertSchedulers(
   return rows.length;
 }
 
+async function upsertShiftTypes(supabase: AdminSupabaseClient, jobs: ConnecteamJobRecord[]) {
+  const rows = jobs
+    .map((job) => {
+      const jobId = readJobId(job);
+      if (!jobId) {
+        return null;
+      }
+
+      return {
+        job_id: jobId,
+        title: readJobTitle(job),
+        code: normalizeString(job.code),
+        color: normalizeString(job.color),
+        is_deleted: job.isDeleted === true,
+        source_payload: job,
+        last_seen_at: isoNow()
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+
+  if (rows.length === 0) {
+    return 0;
+  }
+
+  const { error } = await supabase.from("connecteam_shift_types").upsert(rows, {
+    onConflict: "job_id"
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return rows.length;
+}
+
 async function getSchedulerAssignments(
   supabase: AdminSupabaseClient,
   connectionId: string
@@ -638,6 +719,9 @@ function buildShiftAssignments(
     const startAt = readShiftStart(shift);
     const endAt = readShiftEnd(shift);
     const userIds = readShiftUserIds(shift);
+    const jobId = readShiftJobId(shift);
+    const jobTitle = readShiftJobTitle(shift);
+    const jobCode = readShiftJobCode(shift);
 
     if (!connecteamShiftId || !startAt || !endAt || userIds.length === 0) {
       continue;
@@ -660,6 +744,9 @@ function buildShiftAssignments(
         endAt,
         shiftDate: startAt.slice(0, 10),
         scheduledMinutes,
+        jobId,
+        jobTitle,
+        jobCode,
         rawPayload: shift
       });
     }
@@ -700,6 +787,9 @@ async function replaceShiftWindow(
     end_at: assignment.endAt,
     shift_date: assignment.shiftDate,
     scheduled_minutes: assignment.scheduledMinutes,
+    job_id: assignment.jobId,
+    job_title: assignment.jobTitle,
+    job_code: assignment.jobCode,
     raw_payload: assignment.rawPayload,
     ingested_at: isoNow()
   }));
@@ -741,6 +831,70 @@ function aggregateDailySchedules(assignments: ShiftAssignment[], timeZone: strin
   }
 
   return [...aggregates.values()];
+}
+
+async function listStoredShifts(
+  supabase: AdminSupabaseClient,
+  connectionId: string,
+  startDate: string
+) {
+  const { data, error } = await supabase
+    .from("connecteam_shifts")
+    .select("client_id,zendesk_connection_id,connecteam_user_id,start_at,end_at,job_id")
+    .eq("connecteam_connection_id", connectionId)
+    .gte("shift_date", startDate)
+    .order("shift_date", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []) as StoredShiftRow[];
+}
+
+async function listShiftTypeRules(supabase: AdminSupabaseClient) {
+  const { data, error } = await supabase
+    .from("connecteam_shift_types")
+    .select("job_id,title,code,include_in_worked_hours");
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []) as ShiftTypeRow[];
+}
+
+function aggregateDailySchedulesFromStoredShifts(
+  shifts: StoredShiftRow[],
+  rules: Map<string, boolean>,
+  timeZone: string
+) {
+  const assignments: ShiftAssignment[] = [];
+
+  for (const shift of shifts) {
+    if (shift.job_id && rules.get(shift.job_id) === false) {
+      continue;
+    }
+
+    assignments.push({
+      clientId: shift.client_id,
+      zendeskConnectionId: shift.zendesk_connection_id,
+      connecteamUserId: shift.connecteam_user_id,
+      connecteamShiftId: "",
+      schedulerId: "",
+      schedulerName: null,
+      startAt: shift.start_at,
+      endAt: shift.end_at,
+      shiftDate: shift.start_at.slice(0, 10),
+      scheduledMinutes: minutesBetween(shift.start_at, shift.end_at),
+      jobId: shift.job_id,
+      jobTitle: null,
+      jobCode: null,
+      rawPayload: {}
+    });
+  }
+
+  return aggregateDailySchedules(assignments, timeZone);
 }
 
 async function replaceDailySchedules(
@@ -832,6 +986,124 @@ async function syncLegacyTimesheetData(
   if (error) {
     throw error;
   }
+}
+
+async function getConnectionForRebuild(
+  supabase: AdminSupabaseClient,
+  connectionId: string
+) {
+  const { data, error } = await supabase
+    .from("connecteam_connections")
+    .select(
+      "id,client_id,connection_scope,name,credential_type,external_account_id,access_token_encrypted,status,metadata,last_validated_at,last_validation_status,last_validation_error,last_synced_at,sync_status,sync_lock_expires_at,last_sync_started_at,last_sync_completed_at,last_sync_status,last_sync_error,users_synced_at,shifts_synced_through"
+    )
+    .eq("id", connectionId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as SyncConnectionRow;
+}
+
+async function getShiftDateRange(
+  supabase: AdminSupabaseClient,
+  connectionId: string
+) {
+  const [{ data: firstRow, error: firstError }, { data: lastRow, error: lastError }] = await Promise.all([
+    supabase
+      .from("connecteam_shifts")
+      .select("shift_date")
+      .eq("connecteam_connection_id", connectionId)
+      .order("shift_date", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("connecteam_shifts")
+      .select("shift_date")
+      .eq("connecteam_connection_id", connectionId)
+      .order("shift_date", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+  ]);
+
+  if (firstError) {
+    throw firstError;
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return {
+    startDate: firstRow?.shift_date ?? null,
+    endDate: lastRow?.shift_date ?? null
+  };
+}
+
+export async function rebuildConnecteamWorkedHoursForConnection(connectionId: string, startDate?: string) {
+  const supabase = createAdminSupabaseClient();
+  const connection = await getConnectionForRebuild(supabase, connectionId);
+  const effectiveStartDate = startDate ?? (await getShiftDateRange(supabase, connectionId)).startDate;
+
+  if (!effectiveStartDate) {
+    return {
+      connectionId,
+      startDate: null,
+      endDate: null,
+      clientIds: [] as string[],
+      scheduledDays: 0
+    };
+  }
+
+  const [storedShifts, shiftTypes] = await Promise.all([
+    listStoredShifts(supabase, connectionId, effectiveStartDate),
+    listShiftTypeRules(supabase)
+  ]);
+  const includeRuleByJobId = new Map(shiftTypes.map((row) => [row.job_id, row.include_in_worked_hours]));
+  const dailySchedules = aggregateDailySchedulesFromStoredShifts(
+    storedShifts,
+    includeRuleByJobId,
+    readConnectionTimezone(connection)
+  );
+
+  await replaceDailySchedules(supabase, connection, dailySchedules, effectiveStartDate);
+  await syncLegacyTimesheetData(supabase, connection, dailySchedules, effectiveStartDate);
+
+  const clientIds = [...new Set(storedShifts.map((row) => row.client_id))];
+  const endDate =
+    dailySchedules.length > 0
+      ? dailySchedules.reduce((latest, row) => (row.workDate > latest ? row.workDate : latest), dailySchedules[0].workDate)
+      : (await getShiftDateRange(supabase, connectionId)).endDate;
+
+  return {
+    connectionId,
+    startDate: effectiveStartDate,
+    endDate,
+    clientIds,
+    scheduledDays: dailySchedules.length
+  };
+}
+
+export async function rebuildAllConnecteamWorkedHours() {
+  const supabase = createAdminSupabaseClient();
+  const { data, error } = await supabase
+    .from("connecteam_connections")
+    .select("id")
+    .eq("status", "active")
+    .order("created_at");
+
+  if (error) {
+    throw error;
+  }
+
+  const results = [];
+  for (const row of data ?? []) {
+    results.push(await rebuildConnecteamWorkedHoursForConnection(row.id));
+  }
+
+  return results;
 }
 
 async function getZendeskAgents(
@@ -1083,6 +1355,7 @@ async function runConnectionSync(
   try {
     const client = getConnecteamClient(connection.access_token_encrypted);
     const users = await client.listAllUsers();
+    const jobs = await client.listAllJobs();
     const schedulers = await client.listAllSchedulers();
     const schedulerAssignments = await getSchedulerAssignments(supabase, connection.id);
     const shiftWindow = getShiftWindowBounds(connection);
@@ -1097,6 +1370,7 @@ async function runConnectionSync(
     );
 
     await upsertSchedulers(supabase, connection.id, schedulers);
+    await upsertShiftTypes(supabase, jobs);
 
     if (schedulerAssignments.length > 0) {
       for (const target of schedulerAssignments) {
@@ -1138,9 +1412,7 @@ async function runConnectionSync(
 
     const usersCount = await upsertUsers(supabase, connection, users);
     const shiftsCount = await replaceShiftWindow(supabase, connection, assignments, shiftWindow.startDate);
-    const dailySchedules = aggregateDailySchedules(assignments, readConnectionTimezone(connection));
-    const scheduledDaysCount = await replaceDailySchedules(supabase, connection, dailySchedules, shiftWindow.startDate);
-    await syncLegacyTimesheetData(supabase, connection, dailySchedules, shiftWindow.startDate);
+    const rebuildResult = await rebuildConnecteamWorkedHoursForConnection(connection.id, shiftWindow.startDate);
     const mappingResult = await autoMatchAgents(
       supabase,
       connection,
@@ -1159,7 +1431,7 @@ async function runConnectionSync(
       users: usersCount,
       schedulers: schedulers.length,
       shifts: shiftsCount,
-      scheduledDays: scheduledDaysCount,
+      scheduledDays: rebuildResult.scheduledDays,
       mappingsAuto: mappingResult.autoCount,
       mappingsUnmatched: mappingResult.unmatchedCount
     };

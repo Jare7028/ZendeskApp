@@ -113,6 +113,15 @@ type ZendeskConnectionRow = {
   subdomain: string;
 };
 
+type ShiftTypeRow = {
+  job_id: string;
+  title: string | null;
+  code: string | null;
+  include_in_worked_hours: boolean;
+  is_deleted: boolean;
+  last_seen_at: string;
+};
+
 function normalizeEmail(value: string | null) {
   const trimmed = value?.trim().toLowerCase();
   return trimmed ? trimmed : null;
@@ -170,7 +179,8 @@ export async function getConnecteamConnectionStatus() {
     { data: schedules, error: schedulesError },
     { data: schedulers, error: schedulersError },
     { data: schedulerAssignments, error: schedulerAssignmentsError },
-    { data: zendeskConnections, error: zendeskConnectionsError }
+    { data: zendeskConnections, error: zendeskConnectionsError },
+    { data: shiftTypes, error: shiftTypesError }
   ] = await Promise.all([
     supabase.from("clients").select("id,name,slug").order("name"),
     supabase
@@ -196,7 +206,10 @@ export async function getConnecteamConnectionStatus() {
     supabase
       .from("zendesk_connecteam_schedules")
       .select("id,client_id,zendesk_connection_id,connecteam_connection_id,scheduler_id,scheduler_name"),
-    supabase.from("zendesk_connections").select("id,client_id,name,subdomain").order("name")
+    supabase.from("zendesk_connections").select("id,client_id,name,subdomain").order("name"),
+    supabase
+      .from("connecteam_shift_types")
+      .select("job_id,title,code,include_in_worked_hours,is_deleted,last_seen_at")
   ]);
 
   if (clientsError) throw clientsError;
@@ -208,6 +221,7 @@ export async function getConnecteamConnectionStatus() {
   if (schedulersError) throw schedulersError;
   if (schedulerAssignmentsError) throw schedulerAssignmentsError;
   if (zendeskConnectionsError) throw zendeskConnectionsError;
+  if (shiftTypesError) throw shiftTypesError;
 
   const latestRunByConnection = new Map<string, SyncRunRow>();
   const latestSuccessRunByConnection = new Map<string, SyncRunRow>();
@@ -313,7 +327,10 @@ export async function getConnecteamConnectionStatus() {
           client: clientById.get(assignment.client_id) ?? null,
           zendeskConnection
         };
-      })
+      }),
+      shiftTypes: [...((shiftTypes ?? []) as ShiftTypeRow[])].sort((left, right) =>
+        (left.title ?? left.code ?? left.job_id).localeCompare(right.title ?? right.code ?? right.job_id)
+      )
     };
   });
 }

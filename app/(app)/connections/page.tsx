@@ -17,6 +17,7 @@ import {
   disconnectConnecteamConnectionAction,
   disconnectZendeskConnectionAction,
   reauthZendeskConnectionAction,
+  saveConnecteamShiftTypeRulesAction,
   saveZendeskConnecteamScheduleAction,
   saveZendeskSlaConfigAction,
   testConnecteamConnectionAction,
@@ -116,6 +117,10 @@ function formatConnectionMessage(status: string | undefined, detail: string | un
       return { tone: "error", message: `Connecteam validation failed${suffix}.` } satisfies FlashMessage;
     case "connecteam-schedule-save-failed":
       return { tone: "error", message: `Connecteam scheduler assignment failed${suffix}.` } satisfies FlashMessage;
+    case "connecteam-shift-types-saved":
+      return { tone: "success", message: `Connecteam worked-hours shift type rules saved${suffix}.` } satisfies FlashMessage;
+    case "connecteam-shift-types-save-failed":
+      return { tone: "error", message: `Connecteam shift type rules could not be saved${suffix}.` } satisfies FlashMessage;
     case "oauth-denied":
       return { tone: "error", message: `Zendesk authorization was denied${suffix}.` } satisfies FlashMessage;
     case "oauth-failed":
@@ -496,6 +501,62 @@ export default async function ConnectionsPage({
                       );
                     })}
                   </div>
+                </div>
+
+                <div className="space-y-4 rounded-[24px] border border-border bg-muted/20 p-5">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-semibold text-foreground">Worked hours shift types</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Global include or exclude rules for Connecteam shift types. New types count by default until you
+                      explicitly exclude them.
+                    </p>
+                  </div>
+
+                  {connection.shiftTypes.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No Connecteam shift types have been discovered yet. Run a sync after the API key is validated.
+                    </p>
+                  ) : (
+                    <form action={saveConnecteamShiftTypeRulesAction} className="space-y-4">
+                      <div className="space-y-3">
+                        {connection.shiftTypes.map((shiftType) => (
+                          <div
+                            className="grid gap-3 rounded-2xl border border-border bg-background px-4 py-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(180px,220px)]"
+                            key={`${connection.id}:${shiftType.job_id}`}
+                          >
+                            <div className="space-y-1 text-sm">
+                              <p className="font-medium text-foreground">
+                                {shiftType.title ?? shiftType.code ?? shiftType.job_id}
+                              </p>
+                              <p className="text-muted-foreground">
+                                {shiftType.code ? `Code ${shiftType.code}` : "No code"} · Job ID {shiftType.job_id}
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor={`shift-type-${connection.id}-${shiftType.job_id}`}>Count as worked hours</Label>
+                              <select
+                                className="flex h-11 w-full rounded-2xl border border-input bg-background px-4 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                                defaultValue={shiftType.include_in_worked_hours ? "include" : "exclude"}
+                                id={`shift-type-${connection.id}-${shiftType.job_id}`}
+                                name={`shiftType:${shiftType.job_id}`}
+                              >
+                                <option value="include">Include</option>
+                                <option value="exclude">Exclude</option>
+                              </select>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Button type="submit">Save shift type rules</Button>
+                        <p className="text-xs text-muted-foreground">
+                          Saving rebuilds Connecteam worked-hours data from stored shifts and recomputes affected metrics.
+                        </p>
+                      </div>
+                    </form>
+                  )}
                 </div>
               </CardContent>
             </Card>

@@ -33,6 +33,7 @@ export type ConnecteamSchedulerRecord = {
 export type ConnecteamShiftRecord = {
   id?: string | number | null;
   shiftId?: string | number | null;
+  jobId?: string | number | null;
   userId?: string | number | null;
   assignedUserId?: string | number | null;
   employeeId?: string | number | null;
@@ -43,6 +44,17 @@ export type ConnecteamShiftRecord = {
   startDate?: string | null;
   endDate?: string | null;
   timezone?: string | null;
+  [key: string]: unknown;
+};
+
+export type ConnecteamJobRecord = {
+  jobId?: string | number | null;
+  id?: string | number | null;
+  title?: string | null;
+  name?: string | null;
+  code?: string | null;
+  color?: string | null;
+  isDeleted?: boolean | null;
   [key: string]: unknown;
 };
 
@@ -251,6 +263,14 @@ export class ConnecteamClient {
     return parsePageEnvelope<ConnecteamShiftRecord>(payload, ["shifts", "items", "results"], limit, offset);
   }
 
+  async listJobs(options?: { limit?: number; offset?: number }) {
+    const limit = options?.limit ?? DEFAULT_PAGE_SIZE;
+    const offset = options?.offset ?? 0;
+    const response = await this.request("/jobs/v1/jobs", { limit, offset });
+    const payload = await readJsonOrThrow<unknown>(response);
+    return parsePageEnvelope<ConnecteamJobRecord>(payload, ["jobs", "items", "results"], limit, offset);
+  }
+
   async listAllUsers(options?: { pageSize?: number }) {
     return this.collectPages<ConnecteamUserRecord>((offset, limit) => this.listUsers({ offset, limit }), options?.pageSize);
   }
@@ -274,6 +294,13 @@ export class ConnecteamClient {
           startTime: options?.startTime,
           endTime: options?.endTime
         }),
+      options?.pageSize
+    );
+  }
+
+  async listAllJobs(options?: { pageSize?: number }) {
+    return this.collectPages<ConnecteamJobRecord>(
+      (offset, limit) => this.listJobs({ offset, limit }),
       options?.pageSize
     );
   }

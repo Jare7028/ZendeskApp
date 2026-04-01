@@ -9,7 +9,12 @@ import {
   disconnectConnecteamConnection,
   testConnecteamConnection
 } from "@/lib/connecteam/connection";
-import { runConnecteamPostConnectionSync, saveZendeskConnecteamSchedule } from "@/lib/connecteam/sync";
+import {
+  rebuildAllConnecteamWorkedHours,
+  runConnecteamPostConnectionSync,
+  saveZendeskConnecteamSchedule
+} from "@/lib/connecteam/sync";
+import { recomputeComputedMetricsForDateRange } from "@/lib/metrics/compute";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import {
@@ -288,6 +293,98 @@ export async function saveZendeskConnecteamScheduleAction(formData: FormData) {
       )
     );
   }
+}
+
+export async function saveConnecteamShiftTypeRulesAction(formData: FormData) {
+  await requireAdmin();
+
+  const supabase = createAdminSupabaseClient();
+  const entries = [...formData.entries()]
+    .map(([key, value]) => {
+      if (!key.startsWith("shiftType:")) {
+        return null;
+      }
+
+      const jobId = key.slice("shiftType:".length).trim();
+      const mode = String(value).trim();
+      if (!jobId || (mode !== "include" && mode !== "exclude")) {
+        return null;
+      }
+
+      return {
+        job_id: jobId,
+        include_in_worked_hours: mode === "include"
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+  if (entries.length === 0) {
+    redirect(buildConnectionsRedirect("connecteam-shift-types-save-failed", "No shift types were submitted."));
+  }
+
+  for (const entry of entries) {
+    const { data: existing, error: existingError } = await supabase
+      .from("connecteam_shift_types")
+      .select("job_id")
+      .eq("job_id", entry.job_id)
+      .maybeSingle();
+
+    if (existingError) {
+      redirect(buildConnectionsRedirect("connecteam-shift-types-save-failed", existingError.message));
+    }
+
+    const result = existing
+      ? await supabase
+          .from("connecteam_shift_types")
+          .update({ include_in_worked_hours: entry.include_in_worked_hours })
+          .eq("job_id", entry.job_id)
+      : await supabase.from("connecteam_shift_types").insert(entry);
+
+    if (result.error) {
+      redirect(buildConnectionsRedirect("connecteam-shift-types-save-failed", result.error.message));
+    }
+  }
+
+  try {
+    const rebuilds = await rebuildAllConnecteamWorkedHours();
+    const clientIds = [...new Set(rebuilds.flatMap((result) => result.clientIds))];
+    const datedRebuilds = rebuilds.filter(
+      (result): result is (typeof rebuilds)[number] & { startDate: string; endDate: string } =>
+        Boolean(result.startDate && result.endDate)
+    );
+
+    if (clientIds.length > 0 && datedRebuilds.length > 0) {
+      const startDate = datedRebuilds.reduce(
+        (earliest, result) => (result.startDate < earliest ? result.startDate : earliest),
+        datedRebuilds[0].startDate
+      );
+      const endDate = datedRebuilds.reduce(
+        (latest, result) => (result.endDate > latest ? result.endDate : latest),
+        datedRebuilds[0].endDate
+      );
+
+      await recomputeComputedMetricsForDateRange({
+        clientIds,
+        startDate,
+        endDate
+      });
+    }
+  } catch (rebuildError) {
+    revalidatePath("/connections");
+    revalidatePath("/dashboard");
+    revalidatePath("/admin");
+    redirect(
+      buildConnectionsRedirect(
+        "connecteam-shift-types-save-failed",
+        rebuildError instanceof Error ? rebuildError.message : undefined
+      )
+    );
+  }
+
+  revalidatePath("/connections");
+  revalidatePath("/dashboard");
+  revalidatePath("/admin");
+  redirect(buildConnectionsRedirect("connecteam-shift-types-saved"));
 }
 
 export async function testZendeskConnectionAction(formData: FormData) {
