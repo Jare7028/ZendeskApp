@@ -517,7 +517,7 @@ async function getComputedMetricsRows(options: {
   clientIds: string[];
   startDate: string;
   endDate: string;
-  scope: "client" | "agent" | "channel" | "agent_channel";
+  scope?: "client" | "agent" | "channel" | "agent_channel" | null;
   agentId?: string | null;
 }) {
   if (options.clientIds.length === 0) {
@@ -543,7 +543,7 @@ async function getComputedMetricsRows(options: {
       query = query.contains("dimension", {
         agentMappingId: options.agentId
       });
-    } else {
+    } else if (options.scope) {
       query = query.contains("dimension", { scope: options.scope });
     }
 
@@ -564,6 +564,11 @@ async function getComputedMetricsRows(options: {
   }
 
   return rows;
+}
+
+function getMetricScope(row: Pick<ComputedMetricRow, "dimension">) {
+  const scope = row.dimension?.scope;
+  return typeof scope === "string" ? scope : null;
 }
 
 async function getClientSlaConfigs(clientIds: string[]) {
@@ -1901,43 +1906,67 @@ export async function getDashboardData(
     };
   }
 
-  const [mainRows, agentRows, channelRows, clientRows, serviceRows, clientSlaConfigs] = await Promise.all([
-    getComputedMetricsRows({
-      clientIds: scope.scopedClientIds,
-      startDate: scope.filters.startDate,
-      endDate: scope.filters.endDate,
-      scope: scope.selectedAgent ? "agent" : "client",
-      agentId: scope.selectedAgent?.id ?? null
-    }),
-    getComputedMetricsRows({
-      clientIds: scope.scopedClientIds,
-      startDate: scope.filters.startDate,
-      endDate: scope.filters.endDate,
-      scope: "agent",
-      agentId: scope.selectedAgent?.id ?? null
-    }),
-    getComputedMetricsRows({
-      clientIds: scope.scopedClientIds,
-      startDate: scope.filters.startDate,
-      endDate: scope.filters.endDate,
-      scope: scope.selectedAgent ? "agent_channel" : "channel",
-      agentId: scope.selectedAgent?.id ?? null
-    }),
-    getComputedMetricsRows({
-      clientIds: scope.scopedClientIds,
-      startDate: scope.filters.startDate,
-      endDate: scope.filters.endDate,
-      scope: scope.selectedAgent ? "agent" : "client",
-      agentId: scope.selectedAgent?.id ?? null
-    }),
-    getServiceMetricWindowRows({
-      clientIds: scope.scopedClientIds,
-      startDate: scope.filters.startDate,
-      endDate: scope.filters.endDate,
-      agentMappingId: scope.selectedAgent?.id ?? null
-    }),
-    getClientSlaConfigs(scope.scopedClientIds)
-  ]);
+  let mainRows: ComputedMetricRow[];
+  let agentRows: ComputedMetricRow[];
+  let channelRows: ComputedMetricRow[];
+  let clientRows: ComputedMetricRow[];
+  let serviceRows: ServiceMetricWindowRow[];
+  let clientSlaConfigs: Map<string, ClientSlaConfig>;
+
+  if (scope.selectedAgent) {
+    const [scopedAgentRows, scopedChannelRows, scopedServiceRows, scopedClientSlaConfigs] = await Promise.all([
+      getComputedMetricsRows({
+        clientIds: scope.scopedClientIds,
+        startDate: scope.filters.startDate,
+        endDate: scope.filters.endDate,
+        scope: "agent",
+        agentId: scope.selectedAgent.id
+      }),
+      getComputedMetricsRows({
+        clientIds: scope.scopedClientIds,
+        startDate: scope.filters.startDate,
+        endDate: scope.filters.endDate,
+        scope: "agent_channel",
+        agentId: scope.selectedAgent.id
+      }),
+      getServiceMetricWindowRows({
+        clientIds: scope.scopedClientIds,
+        startDate: scope.filters.startDate,
+        endDate: scope.filters.endDate,
+        agentMappingId: scope.selectedAgent.id
+      }),
+      getClientSlaConfigs(scope.scopedClientIds)
+    ]);
+
+    mainRows = scopedAgentRows;
+    agentRows = scopedAgentRows;
+    channelRows = scopedChannelRows;
+    clientRows = scopedAgentRows;
+    serviceRows = scopedServiceRows;
+    clientSlaConfigs = scopedClientSlaConfigs;
+  } else {
+    const [allComputedRows, scopedServiceRows, scopedClientSlaConfigs] = await Promise.all([
+      getComputedMetricsRows({
+        clientIds: scope.scopedClientIds,
+        startDate: scope.filters.startDate,
+        endDate: scope.filters.endDate
+      }),
+      getServiceMetricWindowRows({
+        clientIds: scope.scopedClientIds,
+        startDate: scope.filters.startDate,
+        endDate: scope.filters.endDate,
+        agentMappingId: null
+      }),
+      getClientSlaConfigs(scope.scopedClientIds)
+    ]);
+
+    mainRows = allComputedRows.filter((row) => getMetricScope(row) === "client");
+    agentRows = allComputedRows.filter((row) => getMetricScope(row) === "agent");
+    channelRows = allComputedRows.filter((row) => getMetricScope(row) === "channel");
+    clientRows = mainRows;
+    serviceRows = scopedServiceRows;
+    clientSlaConfigs = scopedClientSlaConfigs;
+  }
 
   for (const client of scope.visibleClients) {
     const config = clientSlaConfigs.get(client.id);

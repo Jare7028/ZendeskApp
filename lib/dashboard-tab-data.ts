@@ -13,6 +13,41 @@ type DashboardTabDataRequest = {
   hardFilters?: DashboardTabHardFilters;
 };
 
+function isErrorWithMessage(error: unknown): error is { message: string } {
+  return typeof error === "object" && error !== null && "message" in error && typeof error.message === "string";
+}
+
+function readErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (isErrorWithMessage(error)) {
+    return error.message;
+  }
+
+  return "Unknown error";
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 function formatISODate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -74,10 +109,22 @@ export async function loadDashboardTabData(request: DashboardTabDataRequest): Pr
     end: formatISODate(addDays(currentStart, -1))
   } satisfies DashboardSearchParams;
 
-  const [current, previous] = await Promise.all([
-    getDashboardData(currentSearchParams),
-    getDashboardData(previousSearchParams)
-  ]);
+  const current = await getDashboardData(currentSearchParams);
+  let previous: DashboardData | null = null;
+
+  try {
+    previous = await withTimeout(
+      getDashboardData(previousSearchParams),
+      4000,
+      "Previous dashboard comparison window"
+    );
+  } catch (error) {
+    console.error("Failed to load previous dashboard comparison window", {
+      currentSearchParams,
+      previousSearchParams,
+      error: readErrorMessage(error)
+    });
+  }
 
   return { current, previous };
 }
