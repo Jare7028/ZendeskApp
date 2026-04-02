@@ -1,5 +1,6 @@
 import "server-only";
 
+import { recomputeComputedMetricsForDateRange } from "@/lib/metrics/compute";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import {
   ZendeskClient,
@@ -49,6 +50,11 @@ type SyncCounts = {
   ticketMetrics: number;
   agents: number;
   skippedMetrics: number;
+};
+
+type MetricDateRange = {
+  startDate: string | null;
+  endDate: string | null;
 };
 
 export type RunTrigger = "cron" | "manual" | "oauth";
@@ -107,6 +113,36 @@ function channelFromTicket(ticket: ZendeskTicketRecord) {
 
 function numericMinutes(value?: { calendar?: number | null } | null) {
   return typeof value?.calendar === "number" ? value.calendar : null;
+}
+
+function toDateKey(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+}
+
+function mergeMetricDateRange(current: MetricDateRange, nextStartDate: string | null, nextEndDate: string | null) {
+  return {
+    startDate:
+      current.startDate === null
+        ? nextStartDate
+        : nextStartDate === null
+          ? current.startDate
+          : nextStartDate < current.startDate
+            ? nextStartDate
+            : current.startDate,
+    endDate:
+      current.endDate === null
+        ? nextEndDate
+        : nextEndDate === null
+          ? current.endDate
+          : nextEndDate > current.endDate
+            ? nextEndDate
+            : current.endDate
+  };
 }
 
 function normalizeEmail(value: string | null | undefined) {
@@ -288,7 +324,12 @@ async function upsertTickets(
   tickets: ZendeskTicketRecord[]
 ) {
   if (tickets.length === 0) {
-    return { count: 0, maxUpdatedAt: null as string | null };
+    return {
+      count: 0,
+      maxUpdatedAt: null as string | null,
+      startDate: null as string | null,
+      endDate: null as string | null
+    };
   }
 
   const rows = tickets.map((ticket) => ({
@@ -316,22 +357,38 @@ async function upsertTickets(
 
   return {
     count: tickets.length,
-    maxUpdatedAt: maxIso(tickets.map((ticket) => ticket.updated_at))
+    maxUpdatedAt: maxIso(tickets.map((ticket) => ticket.updated_at)),
+    startDate: tickets.reduce<string | null>((earliest, ticket) => {
+      const createdDate = toDateKey(ticket.created_at ?? null);
+      if (!createdDate) {
+        return earliest;
+      }
+
+      return earliest === null || createdDate < earliest ? createdDate : earliest;
+    }, null),
+    endDate: tickets.reduce<string | null>((latest, ticket) => {
+      const createdDate = toDateKey(ticket.created_at ?? null);
+      if (!createdDate) {
+        return latest;
+      }
+
+      return latest === null || createdDate > latest ? createdDate : latest;
+    }, null)
   };
 }
 
-async function getTicketIdMap(
+async function getTicketInfoMap(
   supabase: AdminSupabaseClient,
   connectionId: string,
   zendeskTicketIds: string[]
 ) {
   if (zendeskTicketIds.length === 0) {
-    return new Map<string, string>();
+    return new Map<string, { id: string; createdAtSource: string | null }>();
   }
 
   const { data, error } = await supabase
     .from("tickets")
-    .select("id,zendesk_ticket_id")
+    .select("id,zendesk_ticket_id,created_at_source")
     .eq("zendesk_connection_id", connectionId)
     .in("zendesk_ticket_id", zendeskTicketIds);
 
@@ -339,7 +396,15 @@ async function getTicketIdMap(
     throw error;
   }
 
-  return new Map((data ?? []).map((row) => [String(row.zendesk_ticket_id), row.id as string]));
+  return new Map(
+    (data ?? []).map((row) => [
+      String(row.zendesk_ticket_id),
+      {
+        id: row.id as string,
+        createdAtSource: (row.created_at_source as string | null) ?? null
+      }
+    ])
+  );
 }
 
 async function upsertTicketMetrics(
@@ -351,25 +416,34 @@ async function upsertTicketMetrics(
     return {
       count: 0,
       skippedCount: 0,
-      maxUpdatedAt: null as string | null
+      maxUpdatedAt: null as string | null,
+      startDate: null as string | null,
+      endDate: null as string | null
     };
   }
 
-  const ticketIds = await getTicketIdMap(
+  const ticketInfo = await getTicketInfoMap(
     supabase,
     connection.id,
     metrics.map((metric) => String(metric.ticket_id))
   );
+  let metricRange: MetricDateRange = {
+    startDate: null,
+    endDate: null
+  };
 
   const rows = metrics
     .map((metric) => {
-      const ticketId = ticketIds.get(String(metric.ticket_id));
-      if (!ticketId) {
+      const ticket = ticketInfo.get(String(metric.ticket_id));
+      if (!ticket) {
         return null;
       }
 
+      const createdDate = toDateKey(ticket.createdAtSource);
+      metricRange = mergeMetricDateRange(metricRange, createdDate, createdDate);
+
       return {
-        ticket_id: ticketId,
+        ticket_id: ticket.id,
         first_response_minutes: numericMinutes(metric.reply_time_in_minutes),
         full_resolution_minutes: numericMinutes(metric.full_resolution_time_in_minutes),
         handle_time_minutes: numericMinutes(metric.agent_wait_time_in_minutes),
@@ -393,7 +467,9 @@ async function upsertTicketMetrics(
   return {
     count: rows.length,
     skippedCount: metrics.length - rows.length,
-    maxUpdatedAt: maxIso(metrics.map((metric) => metric.updated_at))
+    maxUpdatedAt: maxIso(metrics.map((metric) => metric.updated_at)),
+    startDate: metricRange.startDate,
+    endDate: metricRange.endDate
   };
 }
 
@@ -469,6 +545,10 @@ async function runIncrementalSync(
   let ticketCursor: string | null = null;
   let ticketPages = 0;
   let ticketMaxUpdatedAt = connection.tickets_synced_through;
+  let metricRange: MetricDateRange = {
+    startDate: null,
+    endDate: null
+  };
 
   while (ticketPages < INCREMENTAL_PAGE_BUDGET) {
     const page = await client.listTickets({
@@ -480,6 +560,7 @@ async function runIncrementalSync(
     const result = await upsertTickets(supabase, connection, page.records);
     counts.tickets += result.count;
     ticketMaxUpdatedAt = maxIso([ticketMaxUpdatedAt, result.maxUpdatedAt]);
+    metricRange = mergeMetricDateRange(metricRange, result.startDate, result.endDate);
     ticketCursor = page.afterCursor;
     ticketPages += 1;
 
@@ -510,6 +591,7 @@ async function runIncrementalSync(
     counts.ticketMetrics += result.count;
     counts.skippedMetrics += result.skippedCount;
     metricsMaxUpdatedAt = maxIso([metricsMaxUpdatedAt, result.maxUpdatedAt]);
+    metricRange = mergeMetricDateRange(metricRange, result.startDate, result.endDate);
     metricCursor = page.afterCursor;
     metricPages += 1;
 
@@ -566,13 +648,17 @@ async function runIncrementalSync(
     details: {
       tickets_pages: ticketPages,
       ticket_metrics_pages: metricPages,
-      agents_pages: agentPages
+      agents_pages: agentPages,
+      metric_window_start: metricRange.startDate,
+      metric_window_end: metricRange.endDate
     },
     updates: {
       tickets_synced_through: ticketMaxUpdatedAt ?? isoNow(),
       ticket_metrics_synced_through: metricsMaxUpdatedAt ?? isoNow(),
       agents_synced_through: agentsMaxUpdatedAt ?? isoNow()
-    }
+    },
+    metricWindowStart: metricRange.startDate,
+    metricWindowEnd: metricRange.endDate
   };
 }
 
@@ -606,6 +692,10 @@ async function runBackfillSync(
     ticket_metrics: backfill.progress?.ticket_metrics ?? 0,
     agents: backfill.progress?.agents ?? 0
   };
+  let metricRange: MetricDateRange = {
+    startDate: null,
+    endDate: null
+  };
 
   await supabase
     .from("zendesk_backfills")
@@ -628,6 +718,7 @@ async function runBackfillSync(
       const result = await upsertTickets(supabase, connection, page.records);
       counts.tickets += result.count;
       progress.tickets += result.count;
+      metricRange = mergeMetricDateRange(metricRange, result.startDate, result.endDate);
       pagesProcessed += 1;
 
       if (page.hasMore) {
@@ -648,6 +739,7 @@ async function runBackfillSync(
       counts.ticketMetrics += result.count;
       counts.skippedMetrics += result.skippedCount;
       progress.ticket_metrics += result.count;
+      metricRange = mergeMetricDateRange(metricRange, result.startDate, result.endDate);
       pagesProcessed += 1;
 
       if (page.hasMore) {
@@ -701,7 +793,9 @@ async function runBackfillSync(
     details: {
       backfill_phase: phase,
       backfill_pages_processed: pagesProcessed,
-      backfill_complete: isComplete
+      backfill_complete: isComplete,
+      metric_window_start: metricRange.startDate,
+      metric_window_end: metricRange.endDate
     },
     updates: isComplete
       ? {
@@ -709,7 +803,9 @@ async function runBackfillSync(
           ticket_metrics_synced_through: connection.ticket_metrics_synced_through ?? isoNow(),
           agents_synced_through: connection.agents_synced_through ?? isoNow()
         }
-      : {}
+      : {},
+    metricWindowStart: metricRange.startDate,
+    metricWindowEnd: metricRange.endDate
   };
 }
 
@@ -748,6 +844,15 @@ async function runConnectionSync(
       syncMode === "backfill"
         ? await runBackfillSync(supabase, connection, client, run.id, backfillPageBudget)
         : await runIncrementalSync(supabase, connection, client);
+
+    if (result.metricWindowStart && result.metricWindowEnd) {
+      await recomputeComputedMetricsForDateRange({
+        clientIds: [connection.client_id],
+        startDate: result.metricWindowStart,
+        endDate: result.metricWindowEnd
+      });
+    }
+
     const isIncompleteBackfill =
       syncMode === "backfill" &&
       "backfill_complete" in result.details &&

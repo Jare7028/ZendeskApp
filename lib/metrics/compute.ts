@@ -79,6 +79,31 @@ function toDateKey(value: string | null) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
 
+function mergeDateRange(
+  current: { startDate: string | null; endDate: string | null },
+  nextStartDate: string | null,
+  nextEndDate: string | null
+) {
+  return {
+    startDate:
+      current.startDate === null
+        ? nextStartDate
+        : nextStartDate === null
+          ? current.startDate
+          : nextStartDate < current.startDate
+            ? nextStartDate
+            : current.startDate,
+    endDate:
+      current.endDate === null
+        ? nextEndDate
+        : nextEndDate === null
+          ? current.endDate
+          : nextEndDate > current.endDate
+            ? nextEndDate
+            : current.endDate
+  };
+}
+
 function normalizeChannel(value: string | null | undefined) {
   const channel = value?.trim().toLowerCase();
 
@@ -449,6 +474,74 @@ async function insertComputedMetricRows(
       throw error;
     }
   }
+}
+
+export async function getComputedMetricsSourceDateRange({ clientIds }: { clientIds: string[] }) {
+  if (clientIds.length === 0) {
+    return {
+      startDate: null,
+      endDate: null
+    };
+  }
+
+  const supabase = createAdminSupabaseClient();
+  const [ticketMinResult, ticketMaxResult, timesheetMinResult, timesheetMaxResult] = await Promise.all([
+    supabase
+      .from("tickets")
+      .select("created_at_source")
+      .in("client_id", clientIds)
+      .not("created_at_source", "is", null)
+      .order("created_at_source", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("tickets")
+      .select("created_at_source")
+      .in("client_id", clientIds)
+      .not("created_at_source", "is", null)
+      .order("created_at_source", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("timesheet_data")
+      .select("work_date")
+      .in("client_id", clientIds)
+      .order("work_date", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("timesheet_data")
+      .select("work_date")
+      .in("client_id", clientIds)
+      .order("work_date", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+  ]);
+
+  if (ticketMinResult.error) {
+    throw ticketMinResult.error;
+  }
+
+  if (ticketMaxResult.error) {
+    throw ticketMaxResult.error;
+  }
+
+  if (timesheetMinResult.error) {
+    throw timesheetMinResult.error;
+  }
+
+  if (timesheetMaxResult.error) {
+    throw timesheetMaxResult.error;
+  }
+
+  return mergeDateRange(
+    {
+      startDate: toDateKey(ticketMinResult.data?.created_at_source ?? null),
+      endDate: toDateKey(ticketMaxResult.data?.created_at_source ?? null)
+    },
+    timesheetMinResult.data?.work_date ?? null,
+    timesheetMaxResult.data?.work_date ?? null
+  );
 }
 
 export async function recomputeComputedMetricsForDateRange({

@@ -1,13 +1,7 @@
 import "server-only";
 
 import { type DashboardTabDateRange, type DashboardTabHardFilters } from "@/lib/dashboard-builder";
-import {
-  ensureDashboardMetrics,
-  getDashboardData,
-  resolveDashboardScope,
-  type DashboardData,
-  type DashboardSearchParams
-} from "@/lib/metrics/dashboard";
+import { getDashboardData, type DashboardData, type DashboardSearchParams } from "@/lib/metrics/dashboard";
 
 type DashboardTabDataWindow = {
   current: DashboardData;
@@ -79,13 +73,10 @@ export async function loadDashboardTabData(request: DashboardTabDataRequest): Pr
     start: formatISODate(addDays(currentStart, -rangeDays)),
     end: formatISODate(addDays(currentStart, -1))
   } satisfies DashboardSearchParams;
-  const scope = await resolveDashboardScope(currentSearchParams);
-
-  await ensureDashboardMetrics(scope.scopedClientIds, previousSearchParams.start ?? normalizedDateRange.start, normalizedDateRange.end);
 
   const [current, previous] = await Promise.all([
-    getDashboardData(currentSearchParams, { skipEnsureMetrics: true }),
-    getDashboardData(previousSearchParams, { skipEnsureMetrics: true })
+    getDashboardData(currentSearchParams),
+    getDashboardData(previousSearchParams)
   ]);
 
   return { current, previous };

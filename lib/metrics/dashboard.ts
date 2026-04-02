@@ -1901,10 +1901,6 @@ export async function getDashboardData(
     };
   }
 
-  if (!options.skipEnsureMetrics) {
-    await ensureDashboardMetrics(scope.scopedClientIds, scope.filters.startDate, scope.filters.endDate);
-  }
-
   const [mainRows, agentRows, channelRows, clientRows, serviceRows, clientSlaConfigs] = await Promise.all([
     getComputedMetricsRows({
       clientIds: scope.scopedClientIds,
@@ -2022,8 +2018,6 @@ export async function getAgentDetailData(agentId: string, searchParams: Dashboar
     return null;
   }
 
-  await ensureDashboardMetrics([agent.clientId], baseScope.filters.startDate, baseScope.filters.endDate);
-
   const [agentRows, peerAgentRows, clientRows, serviceRows, clientSlaConfigs] = await Promise.all([
     getComputedMetricsRows({
       clientIds: [agent.clientId],
@@ -2115,12 +2109,6 @@ export async function getClientDetailData(clientId: string, searchParams: Dashbo
   if (!client) {
     return null;
   }
-
-  await ensureDashboardMetrics(
-    baseScope.visibleClients.map((candidate) => candidate.id),
-    baseScope.filters.startDate,
-    baseScope.filters.endDate
-  );
 
   const clientAgentOptions = await getVisibleAgents([client.id]);
   const [clientRows, agentRows, portfolioRows, serviceRows, clientSlaConfigs] = await Promise.all([

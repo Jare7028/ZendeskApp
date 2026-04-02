@@ -5,6 +5,10 @@ import { revalidatePath } from "next/cache";
 
 import { getCurrentUserContext } from "@/lib/auth/session";
 import { saveAgentMappingOverride } from "@/lib/connecteam/sync";
+import {
+  getComputedMetricsSourceDateRange,
+  recomputeComputedMetricsForDateRange
+} from "@/lib/metrics/compute";
 
 const IGNORE_MAPPING_VALUE = "__ignore__";
 
@@ -32,6 +36,20 @@ async function requireAdmin() {
   return context;
 }
 
+async function recomputeClientMetrics(clientId: string) {
+  const range = await getComputedMetricsSourceDateRange({ clientIds: [clientId] });
+
+  if (!range.startDate || !range.endDate) {
+    return;
+  }
+
+  await recomputeComputedMetricsForDateRange({
+    clientIds: [clientId],
+    startDate: range.startDate,
+    endDate: range.endDate
+  });
+}
+
 export async function saveAgentMappingOverrideAction(formData: FormData) {
   await requireAdmin();
 
@@ -57,10 +75,13 @@ export async function saveAgentMappingOverrideAction(formData: FormData) {
       connecteamUserId: inclusionStatus === "mapped" ? connecteamUserIdRaw : null,
       inclusionStatus
     });
+    await recomputeClientMetrics(clientId);
     revalidatePath("/admin");
+    revalidatePath("/dashboard");
     redirect(buildAdminRedirect("mapping-saved"));
   } catch (error) {
     revalidatePath("/admin");
+    revalidatePath("/dashboard");
     redirect(buildAdminRedirect("mapping-save-failed", error instanceof Error ? error.message : undefined));
   }
 }
@@ -110,10 +131,13 @@ export async function saveAgentMappingBulkReviewAction(formData: FormData) {
       });
     }
 
+    await recomputeClientMetrics(clientId);
     revalidatePath("/admin");
+    revalidatePath("/dashboard");
     redirect(`${buildAdminRedirect("mapping-saved", `${zendeskAgentIds.length} overrides saved`)}${redirectHash}`);
   } catch (error) {
     revalidatePath("/admin");
+    revalidatePath("/dashboard");
     redirect(buildAdminRedirect("mapping-save-failed", error instanceof Error ? error.message : undefined));
   }
 }

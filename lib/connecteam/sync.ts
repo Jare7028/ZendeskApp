@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { recomputeComputedMetricsForDateRange } from "@/lib/metrics/compute";
 import { type ConnecteamConnectionRow, getConnecteamClient } from "@/lib/connecteam/connection";
 import {
   type ConnecteamJobRecord,
@@ -1484,6 +1485,14 @@ async function runConnectionSync(
           ? [{ clientId: connection.client_id, zendeskConnectionId: null }]
           : []
     );
+
+    if (rebuildResult.clientIds.length > 0 && rebuildResult.startDate && rebuildResult.endDate) {
+      await recomputeComputedMetricsForDateRange({
+        clientIds: rebuildResult.clientIds,
+        startDate: rebuildResult.startDate,
+        endDate: rebuildResult.endDate
+      });
+    }
 
     const maxShiftEndAt = maxIso(assignments.map((assignment) => assignment.endAt));
     const counts: SyncCounts = {
