@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getCurrentUserContext } from "@/lib/auth/session";
 import { loadDashboardTabData } from "@/lib/dashboard-tab-data";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,12 @@ function toErrorResponse(error: unknown, fallbackStatus = 500) {
 
 export async function GET(request: Request) {
   try {
+    const context = await getCurrentUserContext();
+
+    if (!context) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const url = new URL(request.url);
     const payload = await loadDashboardTabData({
       dateRange: {
