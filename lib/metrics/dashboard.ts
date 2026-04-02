@@ -8,7 +8,7 @@ import {
   type SlaAlertFeedItem
 } from "@/lib/sla/alerts";
 import { readSlaConfig, type SlaConfig } from "@/lib/sla/config";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getVisibleClients } from "@/lib/zendesk/status";
 
 type JsonObject = Record<string, unknown>;
@@ -66,15 +66,6 @@ type ComputedMetricRow = {
   metric_value: number;
 };
 
-type TicketRow = {
-  id: string;
-  client_id: string;
-  zendesk_connection_id: string;
-  agent_mapping_id: string | null;
-  created_at_source: string | null;
-  raw_payload: JsonObject | null;
-};
-
 type AgentMappingLookupRow = {
   id: string;
   client_id: string;
@@ -86,6 +77,25 @@ type TicketMetricRow = {
   first_response_minutes: number | null;
   full_resolution_minutes: number | null;
   payload: JsonObject | null;
+};
+
+type TicketMetricWithTicketRow = TicketMetricRow & {
+  tickets:
+    | {
+        client_id: string;
+        zendesk_connection_id: string;
+        agent_mapping_id: string | null;
+        created_at_source: string | null;
+        raw_payload: JsonObject | null;
+      }
+    | Array<{
+        client_id: string;
+        zendesk_connection_id: string;
+        agent_mapping_id: string | null;
+        created_at_source: string | null;
+        raw_payload: JsonObject | null;
+      }>
+    | null;
 };
 
 type ZendeskConnectionRow = {
@@ -377,6 +387,23 @@ const CLIENT_SORT_KEYS: ClientSortKey[] = [
   "repliesPerTicket"
 ];
 
+const CORE_SUMMARY_METRIC_KEYS = [
+  "total_interactions",
+  "total_hours_worked",
+  "total_activity_hours",
+  "total_replies",
+  "total_reopens",
+  "total_first_reply_minutes",
+  "total_full_resolution_minutes",
+  "total_requester_wait_minutes",
+  "tickets_with_first_reply",
+  "tickets_with_resolution",
+  "tickets_with_requester_wait",
+  "active_agents_count"
+] as const;
+
+const CHANNEL_TREND_METRIC_KEYS = ["total_interactions"] as const;
+
 function formatISODate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -475,7 +502,7 @@ async function getVisibleAgents(clientIds: string[]) {
     return [] as AgentOption[];
   }
 
-  const supabase = createServerSupabaseClient().schema("app");
+  const supabase = createAdminSupabaseClient();
   const [agentsResult, clientsResult] = await Promise.all([
     supabase
       .from("agent_mappings")
@@ -519,12 +546,13 @@ async function getComputedMetricsRows(options: {
   endDate: string;
   scope?: "client" | "agent" | "channel" | "agent_channel" | null;
   agentId?: string | null;
+  metricKeys?: readonly string[];
 }) {
   if (options.clientIds.length === 0) {
     return [] as ComputedMetricRow[];
   }
 
-  const supabase = createServerSupabaseClient().schema("app");
+  const supabase = createAdminSupabaseClient();
   const pageSize = 1000;
   const rows: ComputedMetricRow[] = [];
   let from = 0;
@@ -538,6 +566,10 @@ async function getComputedMetricsRows(options: {
       .lte("metric_date", options.endDate)
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1);
+
+    if (options.metricKeys && options.metricKeys.length > 0) {
+      query = query.in("metric_key", [...options.metricKeys]);
+    }
 
     if (options.agentId) {
       query = query.contains("dimension", {
@@ -566,17 +598,12 @@ async function getComputedMetricsRows(options: {
   return rows;
 }
 
-function getMetricScope(row: Pick<ComputedMetricRow, "dimension">) {
-  const scope = row.dimension?.scope;
-  return typeof scope === "string" ? scope : null;
-}
-
 async function getClientSlaConfigs(clientIds: string[]) {
   if (clientIds.length === 0) {
     return new Map<string, ClientSlaConfig>();
   }
 
-  const supabase = createServerSupabaseClient().schema("app");
+  const supabase = createAdminSupabaseClient();
   const { data, error } = await supabase
     .from("zendesk_connections")
     .select("id,client_id,name,status,updated_at,metadata")
@@ -618,23 +645,7 @@ async function getServiceMetricWindowRows(options: {
     return [] as ServiceMetricWindowRow[];
   }
 
-  const supabase = createServerSupabaseClient().schema("app");
-  const { data: tickets, error: ticketsError } = await supabase
-    .from("tickets")
-    .select("id,client_id,zendesk_connection_id,agent_mapping_id,created_at_source,raw_payload")
-    .in("client_id", options.clientIds)
-    .gte("created_at_source", `${options.startDate}T00:00:00.000Z`)
-    .lte("created_at_source", `${options.endDate}T23:59:59.999Z`);
-
-  if (ticketsError) {
-    throw ticketsError;
-  }
-
-  const typedTickets = (tickets ?? []) as TicketRow[];
-
-  if (typedTickets.length === 0) {
-    return [];
-  }
+  const supabase = createAdminSupabaseClient();
 
   const { data: agentMappings, error: agentMappingsError } = await supabase
     .from("agent_mappings")
@@ -654,28 +665,39 @@ async function getServiceMetricWindowRows(options: {
     ])
   );
 
-  const ticketMetricRows: TicketMetricRow[] = [];
-  const ticketIds = typedTickets.map((ticket) => ticket.id);
+  const pageSize = 1000;
+  const ticketMetricRows: TicketMetricWithTicketRow[] = [];
+  let from = 0;
 
-  for (let index = 0; index < ticketIds.length; index += 200) {
-    const chunk = ticketIds.slice(index, index + 200);
+  while (true) {
     const { data, error } = await supabase
       .from("ticket_metrics")
-      .select("ticket_id,first_response_minutes,full_resolution_minutes,payload")
-      .in("ticket_id", chunk);
+      .select(
+        "ticket_id,first_response_minutes,full_resolution_minutes,payload,tickets!inner(client_id,zendesk_connection_id,agent_mapping_id,created_at_source,raw_payload)"
+      )
+      .in("tickets.client_id", options.clientIds)
+      .gte("tickets.created_at_source", `${options.startDate}T00:00:00.000Z`)
+      .lte("tickets.created_at_source", `${options.endDate}T23:59:59.999Z`)
+      .order("ticket_id", { ascending: true })
+      .range(from, from + pageSize - 1);
 
     if (error) {
       throw error;
     }
 
-    ticketMetricRows.push(...((data ?? []) as TicketMetricRow[]));
-  }
+    const batch = (data ?? []) as TicketMetricWithTicketRow[];
+    ticketMetricRows.push(...batch);
 
-  const ticketById = new Map(typedTickets.map((ticket) => [ticket.id, ticket]));
+    if (batch.length < pageSize) {
+      break;
+    }
+
+    from += pageSize;
+  }
 
   return ticketMetricRows
     .map((row) => {
-      const ticket = ticketById.get(row.ticket_id);
+      const ticket = Array.isArray(row.tickets) ? (row.tickets[0] ?? null) : row.tickets;
 
       if (!ticket) {
         return null;
@@ -1920,14 +1942,16 @@ export async function getDashboardData(
         startDate: scope.filters.startDate,
         endDate: scope.filters.endDate,
         scope: "agent",
-        agentId: scope.selectedAgent.id
+        agentId: scope.selectedAgent.id,
+        metricKeys: CORE_SUMMARY_METRIC_KEYS
       }),
       getComputedMetricsRows({
         clientIds: scope.scopedClientIds,
         startDate: scope.filters.startDate,
         endDate: scope.filters.endDate,
         scope: "agent_channel",
-        agentId: scope.selectedAgent.id
+        agentId: scope.selectedAgent.id,
+        metricKeys: CHANNEL_TREND_METRIC_KEYS
       }),
       getServiceMetricWindowRows({
         clientIds: scope.scopedClientIds,
@@ -1945,25 +1969,42 @@ export async function getDashboardData(
     serviceRows = scopedServiceRows;
     clientSlaConfigs = scopedClientSlaConfigs;
   } else {
-    const [allComputedRows, scopedServiceRows, scopedClientSlaConfigs] = await Promise.all([
-      getComputedMetricsRows({
-        clientIds: scope.scopedClientIds,
-        startDate: scope.filters.startDate,
-        endDate: scope.filters.endDate
-      }),
-      getServiceMetricWindowRows({
-        clientIds: scope.scopedClientIds,
-        startDate: scope.filters.startDate,
-        endDate: scope.filters.endDate,
-        agentMappingId: null
-      }),
-      getClientSlaConfigs(scope.scopedClientIds)
-    ]);
+    const [clientMetricRows, agentMetricRows, channelMetricRows, scopedServiceRows, scopedClientSlaConfigs] =
+      await Promise.all([
+        getComputedMetricsRows({
+          clientIds: scope.scopedClientIds,
+          startDate: scope.filters.startDate,
+          endDate: scope.filters.endDate,
+          scope: "client",
+          metricKeys: CORE_SUMMARY_METRIC_KEYS
+        }),
+        getComputedMetricsRows({
+          clientIds: scope.scopedClientIds,
+          startDate: scope.filters.startDate,
+          endDate: scope.filters.endDate,
+          scope: "agent",
+          metricKeys: CORE_SUMMARY_METRIC_KEYS
+        }),
+        getComputedMetricsRows({
+          clientIds: scope.scopedClientIds,
+          startDate: scope.filters.startDate,
+          endDate: scope.filters.endDate,
+          scope: "channel",
+          metricKeys: CHANNEL_TREND_METRIC_KEYS
+        }),
+        getServiceMetricWindowRows({
+          clientIds: scope.scopedClientIds,
+          startDate: scope.filters.startDate,
+          endDate: scope.filters.endDate,
+          agentMappingId: null
+        }),
+        getClientSlaConfigs(scope.scopedClientIds)
+      ]);
 
-    mainRows = allComputedRows.filter((row) => getMetricScope(row) === "client");
-    agentRows = allComputedRows.filter((row) => getMetricScope(row) === "agent");
-    channelRows = allComputedRows.filter((row) => getMetricScope(row) === "channel");
-    clientRows = mainRows;
+    mainRows = clientMetricRows;
+    agentRows = agentMetricRows;
+    channelRows = channelMetricRows;
+    clientRows = clientMetricRows;
     serviceRows = scopedServiceRows;
     clientSlaConfigs = scopedClientSlaConfigs;
   }
@@ -2053,19 +2094,22 @@ export async function getAgentDetailData(agentId: string, searchParams: Dashboar
       startDate: baseScope.filters.startDate,
       endDate: baseScope.filters.endDate,
       scope: "agent",
-      agentId
+      agentId,
+      metricKeys: CORE_SUMMARY_METRIC_KEYS
     }),
     getComputedMetricsRows({
       clientIds: [agent.clientId],
       startDate: baseScope.filters.startDate,
       endDate: baseScope.filters.endDate,
-      scope: "agent"
+      scope: "agent",
+      metricKeys: CORE_SUMMARY_METRIC_KEYS
     }),
     getComputedMetricsRows({
       clientIds: [agent.clientId],
       startDate: baseScope.filters.startDate,
       endDate: baseScope.filters.endDate,
-      scope: "client"
+      scope: "client",
+      metricKeys: CORE_SUMMARY_METRIC_KEYS
     }),
     getServiceMetricWindowRows({
       clientIds: [agent.clientId],
@@ -2145,19 +2189,22 @@ export async function getClientDetailData(clientId: string, searchParams: Dashbo
       clientIds: [client.id],
       startDate: baseScope.filters.startDate,
       endDate: baseScope.filters.endDate,
-      scope: "client"
+      scope: "client",
+      metricKeys: CORE_SUMMARY_METRIC_KEYS
     }),
     getComputedMetricsRows({
       clientIds: [client.id],
       startDate: baseScope.filters.startDate,
       endDate: baseScope.filters.endDate,
-      scope: "agent"
+      scope: "agent",
+      metricKeys: CORE_SUMMARY_METRIC_KEYS
     }),
     getComputedMetricsRows({
       clientIds: baseScope.visibleClients.map((candidate) => candidate.id),
       startDate: baseScope.filters.startDate,
       endDate: baseScope.filters.endDate,
-      scope: "client"
+      scope: "client",
+      metricKeys: CORE_SUMMARY_METRIC_KEYS
     }),
     getServiceMetricWindowRows({
       clientIds: [client.id],
