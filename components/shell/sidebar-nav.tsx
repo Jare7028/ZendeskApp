@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { usePathname } from "next/navigation";
-import { BarChart3, DatabaseZap, ShieldCheck } from "lucide-react";
+import { BarChart3, BriefcaseBusiness, DatabaseZap, ShieldCheck } from "lucide-react";
 
 import { type AppRole, isAdmin } from "@/lib/auth/roles";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,12 @@ const links = [
     href: "/connections" as Route,
     label: "Connections",
     icon: DatabaseZap,
+    minimumRole: "viewer" as AppRole
+  },
+  {
+    href: "/scout" as Route,
+    label: "Scout",
+    icon: BriefcaseBusiness,
     minimumRole: "viewer" as AppRole
   },
   {
